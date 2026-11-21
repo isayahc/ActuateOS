@@ -14,17 +14,20 @@
     <section class="pipeline"><div id="phase-video" class="phase current"><b>01</b><span>Source video<small>Actual benchmark recording</small></span></div><span class="arrow">→</span><div id="phase-analysis" class="phase"><b>02</b><span>Video analysis<small>Gemini · observed evidence</small></span></div><span class="arrow">→</span><div id="phase-scene" class="phase"><b>03</b><span>Proposed workcell<small>Gemini → OpenIndustries</small></span></div></section>
     <div class="runbar"><span id="progress">Loading benchmark…</span><label>Saved result <select id="history"><option>No analysis yet</option></select></label></div>
     <section id="segment-controls" hidden>
-      <div class="segment-top"><div><span class="eyebrow">LINKED VIDEO + OI PLAYBACK</span><h2 id="segment-title">Select a subtask</h2></div><div id="segment-chips"></div></div>
+      <div class="segment-top"><div><span id="playback-heading" class="eyebrow">LIVE ROBOT EXECUTION</span><h2 id="segment-title">Select a subtask</h2></div><div id="segment-chips"></div></div>
       <div class="transport"><button id="previous-segment" aria-label="Previous segment">←</button><button id="play-segment">▶ Play segment</button><button id="next-segment" aria-label="Next segment">→</button><input id="segment-scrub" type="range" min="0" max="1000" value="0" aria-label="Synchronized video and scene position"><span id="segment-time"></span><label><input type="checkbox" id="loop-segment"> Loop</label></div>
-      <p class="small">Live robot execution uses its own clock. Video controls navigate the human reference. Storyboard and legacy guided modes follow the video clock.</p>
-      <div class="runtime-controls"><label>OI motion source <select id="motion-source"><option value="robot">Live robot · online planning</option><option value="mujoco">Legacy guided parts · static arm</option><option value="storyboard">Authored storyboard</option></select></label><button id="reconnect-runtime">New execution / reconnect</button><strong id="runtime-status" role="status">MuJoCo · connecting…</strong></div>
+      <p id="transport-help" class="small">Play segment starts Gemini planning and the live robot. Pause/resume controls that same execution. The video below has its own reference playback controls.</p>
+      <strong id="runtime-status" role="status">Connecting robot…</strong>
       <p id="runtime-metrics" class="small">Waiting for physics state.</p>
+      <details id="advanced-inspection"><summary>Advanced inspection · reference animations and diagnostics</summary>
+      <div class="runtime-controls"><label>OI motion source <select id="motion-source"><option value="robot">Live robot · online planning</option><option value="mujoco">Legacy guided parts · static arm</option><option value="storyboard">Authored storyboard</option></select></label><button id="reconnect-runtime">New execution / reconnect</button></div>
       <div id="robot-controls" hidden>
         <p class="small"><strong>First live milestone: step 1 beam staging.</strong> Gemini observes the current simulation and chooses a skill. Joint actuators and gripper contacts execute it. Full frame joining and steps 2–7 are not implemented.</p>
-        <div class="runtime-controls"><button id="robot-run" disabled>Observe & run Gemini agent</button><button id="robot-pause" disabled>Pause robot</button><button id="robot-perturb" disabled>Move source part +8 cm / −4 cm</button></div>
+        <div class="runtime-controls"><button id="robot-perturb" disabled>Move source part +8 cm / −4 cm</button></div>
         <p class="small">Agent decisions use your API key. Part perturbation changes the actual starting pose before observation. Six arm joints + two gripper actuators; no object motion tracks or grasp welds.</p>
         <pre id="robot-log" aria-live="polite"></pre>
       </div>
+      </details>
     </section>
     <div class="columns">
       <section class="card source">

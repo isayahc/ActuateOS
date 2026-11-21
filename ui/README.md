@@ -75,7 +75,9 @@ The real live run and its limitations are documented in
 
 ## Live robot: observe → plan → execute → verify (default)
 
-Select **step 01** and **Live robot · online planning**, optionally click **Move source part +8 cm / −4 cm**, then **Observe & run Gemini agent**. The button requests real, billable managed-agent decisions (usually two: action and post-execution review). The arm moves once the agent returns its decision. Agent status, live joint positions, path hashes, measured results and actual camera observations appear in the UI. **Pause robot / Resume robot** controls execution independently of the human video. **New execution / reconnect** creates a fresh state; prior evidence remains on disk.
+The dashboard opens on the first subtask with live robot planning already selected. Click **Play segment**: it requests Gemini's decision and starts actual robot execution. The same button becomes **Pause segment / Resume segment**, then **Run again** after completion (or **Retry segment** after failure). Planning and verification have explicit progress states, and repeated clicks cannot start duplicate decisions. Unsupported subtasks show a disabled **Robot execution not implemented** button rather than playing an independent-part animation. The human video has its own native controls and clock.
+
+**Advanced inspection** contains the old storyboard/guided-part modes, source-position perturbation, execution reset and detailed logs. None of those controls is required to run the robot. Agent decisions use the configured API key (usually two calls: action and post-execution review). Previous execution evidence remains on disk.
 
 The currently supported task is **staging a chassis beam beside the fixture**, a prerequisite to step 1's observed beam selection/frame joining. Joining the frame and steps 2–7 are unsupported by the live robot and fail explicitly. The original seven authored segments remain available in **Authored storyboard** mode. **Legacy guided parts · static arm** preserves the previous comparison baseline.
 
@@ -103,7 +105,7 @@ npm run build
 .venv-mujoco/bin/python ui/server.py
 ```
 
-Open http://127.0.0.1:5187. The live robot uses the dedicated agent and pause buttons above. In legacy guided mode, **Play segment** advances the reference-clock dynamics. The OI renderer displays MuJoCo body states; browser keyframes are disabled in both physics modes. **Authored storyboard** explicitly selects the earlier animation.
+Open http://127.0.0.1:5187 and click **Play segment**. In the explicitly selected advanced reference modes, the button instead says **Play reference**. The OI renderer displays MuJoCo body states; browser keyframes are disabled in both physics modes. **Authored storyboard** explicitly selects the earlier animation.
 
 For comparison, the **legacy** `Simulation` in `ui/mujoco_runtime.py` uses free workpiece bodies controlled by compliant welds to scripted mocap targets at 200 Hz, with a static arm. The new `RobotSimulation` uses articulated actuation at 500 Hz and contact-only grasping. Both adapters use the existing IndustReal workcell, not OI's unrelated farm demo.
 
