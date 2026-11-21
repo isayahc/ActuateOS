@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Video-to-Workcell · Mission Control</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header><div class="brand"><span class="mark">V/W</span><div>VIDEO-TO-WORKCELL<small>RESEARCH WORKBENCH</small></div></div><span class="connection" id="connection">Connecting…</span></header>
+  <main>
+    <section class="hero"><div><p class="eyebrow">AGENT OBSERVABILITY / 01</p><h1>From procedure<br>to a verified plan.</h1><p class="intro">Follow the agent, inspect its decisions, and see what the validator can prove.</p></div><div class="launch"><button id="launch">＋ Run planning trial</button><small>Live Gemini API call · uses your configured key</small></div></section>
+    <div id="error" role="alert" hidden></div>
+    <div class="workspace">
+      <aside><div class="section-title">RUN HISTORY <span id="count">0</span></div><div id="runs"></div></aside>
+      <section id="detail" aria-live="polite"><div class="empty">No runs yet. Start a planning trial to see the agent at work.</div></section>
+    </div>
+    <footer>LOCAL WORKBENCH <span>Symbolic validation ≠ physical execution</span></footer>
+  </main>
+</body>
+</html>
