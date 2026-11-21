@@ -13,7 +13,7 @@ from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/"examples"))
-from managed_agent_smoke import DEFAULT_AGENT, interact, read_snapshot_json, request
+from managed_agent_smoke import DEFAULT_AGENT, OBSERVATION_MODEL, PLANNING_MODEL, interact, read_snapshot_json, request
 
 DATA = ROOT/"data"/"industreal"
 
@@ -104,7 +104,7 @@ Use 5â€“15 meaningful observed steps, not one step per image. Steps must be chro
             content.extend([{"type":"text","text":f"Video timestamp {frame['time_s']} seconds"},
                 {"type":"image","mime_type":"image/jpeg","data":base64.b64encode((output/frame["file"]).read_bytes()).decode()}])
         status("analyzing","Gemini agent 1 is reconstructing the procedure from 48 timestamped video frames.")
-        first=interact(key,DEFAULT_AGENT,content,output,"analysis")
+        first=interact(key,DEFAULT_AGENT,content,output,"analysis",model=OBSERVATION_MODEL)
         analysis=download_json(key,first,"analysis.json",output,"analysis")
         validate_analysis(analysis,duration)
         write(output/"analysis.json",analysis)
@@ -127,7 +127,7 @@ Rules: SI meters, Y up, Euler degrees. Room axes are [width, DEPTH, HEIGHT], 1â€
 Video analysis:\n"""+json.dumps(analysis)+"\nSource geometry catalog:\n"+json.dumps(catalog)
         (output/"scene-prompt.txt").write_text(scene_prompt)
         status("designing","Gemini agent 2 is designing a workcell using the reconstruction and original dataset geometry catalog.")
-        second=interact(key,DEFAULT_AGENT,scene_prompt,output,"scene")
+        second=interact(key,DEFAULT_AGENT,scene_prompt,output,"scene",model=PLANNING_MODEL)
         spec=download_json(key,second,"scene-spec.json",output,"scene")
         if not isinstance(spec,dict) or not isinstance(spec.get("objects"),list) or not isinstance(spec.get("assumptions"),list):
             raise ValueError("Invalid scene specification")

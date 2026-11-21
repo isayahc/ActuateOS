@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT/"scripts"))
 from video_pipeline import write, download_json
-from managed_agent_smoke import DEFAULT_AGENT, interact
+from managed_agent_smoke import DEFAULT_AGENT, OBSERVATION_MODEL, interact
 
 
 def start_agent(simulation: "RobotSimulation", session_id: str, key: str) -> threading.Thread:
@@ -41,7 +41,7 @@ Choose ONE bounded next action using the CURRENT observation, not a saved motion
 Write decision.json using sandbox code, with {"action":"pick_place", "object_id":"an available object id", "target_id":"an available target id", "reason":"observation-grounded reason"}. For finish or report_failure provide action and reason only. Only finish if result.passed is true; scope your conclusion to the task verification scope. If a pick failed, inspect the reason and current pose; retry only if the skill can plausibly recover (at most two attempts), otherwise report_failure. Do not fabricate observations or claim real-world or full-assembly success.
 Current observation:\n"""+json.dumps(observation)
                 content=[{"type":"text","text":prompt},{"type":"image","mime_type":"image/png","data":base64.b64encode((output/f"{phase}.png").read_bytes()).decode()}]
-                result=interact(key,DEFAULT_AGENT,content,output,f"robot-{turn}")
+                result=interact(key,DEFAULT_AGENT,content,output,f"robot-{turn}",model=OBSERVATION_MODEL)
                 decision=download_json(key,result,"decision.json",output,f"robot-{turn}",allow_identical_duplicates=True)
                 if not isinstance(decision,dict) or not isinstance(decision.get("reason"),str):raise ValueError("Invalid agent decision")
                 write(output/f"decision-{turn}.json",decision)

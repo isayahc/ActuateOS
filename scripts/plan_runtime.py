@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "ui"))
 from task_graph import validate_plan
 from video_pipeline import download_json, write
-from managed_agent_smoke import DEFAULT_AGENT, interact
+from managed_agent_smoke import DEFAULT_AGENT, PLANNING_MODEL, interact
 
 
 def generate_runtime_plan(output: Path, key: str) -> dict[str, Any]:
@@ -61,7 +61,7 @@ storyboard tracks. Use the supplied scene only, and state verification scope in 
 task. Prefer an honest entirely unsupported graph to invented executable capabilities.
 Observed procedure:\n''' + json.dumps(analysis) + "\nScene:\n" + json.dumps(spec)
     (output / "runtime-prompt.txt").write_text(prompt)
-    result = interact(key, DEFAULT_AGENT, prompt, output, "runtime")
+    result = interact(key, DEFAULT_AGENT, prompt, output, "runtime", model=PLANNING_MODEL)
     plan = download_json(key, result, "runtime-plan.json", output, "runtime")
     validated = validate_plan(plan, analysis, manifest, spec)
     write(output / "runtime-plan.json", validated)

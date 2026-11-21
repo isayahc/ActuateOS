@@ -9,7 +9,7 @@ import re
 import subprocess
 
 from video_pipeline import ROOT, DATA, write, download_json, reference_labels
-from managed_agent_smoke import DEFAULT_AGENT, interact
+from managed_agent_smoke import DEFAULT_AGENT, OBSERVATION_MODEL, interact
 
 
 def compare_segments(output,key):
@@ -46,7 +46,7 @@ One entry per supplied step, same order. verdict must be one of consistent_at_co
         records.append(record)
     write(output/"segment-evidence.json",records)
     status("reviewing","Gemini is comparing the video and rendered scene states for every segment.")
-    result=interact(key,DEFAULT_AGENT,content,output,"segment-comparison")
+    result=interact(key,DEFAULT_AGENT,content,output,"segment-comparison",model=OBSERVATION_MODEL)
     report=download_json(key,result,"segment-comparison.json",output,"segment-comparison")
     verdicts={"consistent_at_coarse_level","partial","not_represented","uncertain"}
     if not isinstance(report,dict) or not isinstance(report.get("segments"),list) or len(report["segments"])!=len(segments):

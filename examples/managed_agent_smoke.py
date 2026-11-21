@@ -17,6 +17,8 @@ from uuid import uuid4
 
 BASE_URL = "https://generativelanguage.googleapis.com/v1beta"
 DEFAULT_AGENT = "antigravity-preview-09-2026"
+OBSERVATION_MODEL = "gemini-4-hydrogen"
+PLANNING_MODEL = "gemini-4-carbon"
 
 
 def request(key, path, payload=None):
@@ -34,9 +36,10 @@ def request(key, path, payload=None):
         raise RuntimeError(f"Gemini API HTTP {error.code}: {detail}") from None
 
 
-def interact(key, agent, prompt, output, turn, previous=None):
+def interact(key, agent, prompt, output, turn, previous=None, *, model=OBSERVATION_MODEL):
     payload = {
         "agent": agent,
+        "agent_config": {"type": "antigravity", "model": model},
         "input": prompt,
         "environment": previous["environment_id"] if previous else "remote",
         "tools": [{"type": "code_execution"}],
@@ -44,11 +47,18 @@ def interact(key, agent, prompt, output, turn, previous=None):
     }
     if previous:
         payload["previous_interaction_id"] = previous["id"]
+    # Record requested routing separately from the unmodified provider response.
+    routing = {"agent": agent, "requested_model": model, "turn": turn}
+    routing_path = output / f"model-{turn}.json"
+    routing_path.write_text(json.dumps(routing, indent=2) + "\n")
     result = json.loads(request(key, "/interactions", payload))
     deadline = time.monotonic() + 600
     while True:
         (output / f"turn-{turn}.json").write_text(json.dumps(result, indent=2) + "\n")
         status = result.get("status")
+        routing.update(interaction_id=result.get("id"), status=status,
+                       returned_agent_config=result.get("agent_config"))
+        routing_path.write_text(json.dumps(routing, indent=2) + "\n")
         print(f"Turn {turn}: {result.get('id')} — {status}", flush=True)
         if status == "completed":
             if not result.get("id") or not result.get("environment_id"):
@@ -89,6 +99,8 @@ def verify_snapshot(snapshot, filename, expected):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--agent", default=DEFAULT_AGENT)
+    parser.add_argument("--model", default=OBSERVATION_MODEL,
+                        choices=[OBSERVATION_MODEL, PLANNING_MODEL, "gemini-4-argon", "gemini-4-neon"])
     args = parser.parse_args()
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not key:
@@ -104,14 +116,14 @@ def main():
         f"Use Python in your sandbox to write {filename} in your working directory. "
         f"Its JSON must contain exactly run_id={run_id!r}, numbers=[2,3,5,7], "
         "and sum equal to the computed sum of numbers. Execute the code; do not just describe it.",
-        output, 1,
+        output, 1, model=args.model,
     )
     second = interact(
         key, args.agent,
         f"Read the existing {filename}. Append 11 to numbers, recompute sum, "
         "and add verified=true. Preserve run_id. Save to the same file. "
         "If the file is missing, report failure rather than recreating it. Execute the code.",
-        output, 2, previous=first,
+        output, 2, previous=first, model=args.model,
     )
     if second["environment_id"] != first["environment_id"]:
         raise RuntimeError("The second turn did not reuse the original environment.")
