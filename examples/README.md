@@ -65,5 +65,14 @@ video ingestion requires a separately verified integration strategy.
 
 ## Verification status
 
-Live E2E verification is pending API credentials. Local syntax and missing-key
-behavior can be checked without making paid calls; neither establishes API access.
+Live E2E verification passed using `antigravity-preview-09-2026`:
+
+- Both interactions reached `completed`.
+- The second interaction reused the first interaction's sandbox.
+- The sandbox snapshot downloaded successfully.
+- The downloaded JSON matched the unique run ID, numbers `[2, 3, 5, 7, 11]`,
+  sum `28`, and `verified: true`.
+
+Local evidence is saved under
+`artifacts/managed-agents/63dab2b91b674872b733caf1348d24b1/` (ignored by Git).
+This validates the managed runtime sample, not the proposed physical-process pipeline.

@@ -8,7 +8,7 @@ From human demonstration videos to structured processes, configurable workcells,
 
 Video-to-Workcell investigates whether specialized AI agents, explicit physical-process representations, and deterministic verification can reduce the engineering effort required to automate unfamiliar physical procedures.
 
-**Status:** Research specification with a [Gemini Managed Agents runtime smoke test](examples/README.md). Live smoke-test verification is pending API credentials. The research pipeline, simulator integration, and hardware controller are not implemented. All architecture, integrations, and experiments below are proposed unless stated otherwise. No benchmark results are claimed.
+**Status:** Research specification with a [Gemini Managed Agents runtime smoke test](examples/README.md). The live runtime smoke test has passed, including two-turn sandbox persistence and downloaded-artifact verification. The research pipeline, simulator integration, and hardware controller are not implemented. All architecture, integrations, and experiments below are proposed unless stated otherwise. No benchmark results are claimed.
 
 ## Research motivation
 
