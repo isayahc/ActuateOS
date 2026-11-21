@@ -123,7 +123,7 @@ Schema:
 {"id":"bench", "name":"Assembly bench", "kind":"proposal", "position":[x,y,z], "rotation":[0,0,0], "rationale":"why needed", "step_ids":["step_1"], "parts":[{"name":"top", "shape":"box", "size":[width,height,depth], "position":[local_x,local_y,local_z], "rotation":[0,0,0], "color":[0.4,0.5,0.6]}]},
 {"id":"source_parts", "name":"Dataset parts inventory", "kind":"dataset", "asset_id":"catalog id", "position":[x,y,z], "rotation":[0,0,0], "rationale":"...", "step_ids":["step_1"]}
 ]}
-Rules: SI meters, Y up, Euler degrees. Room axes are [width, DEPTH, HEIGHT], 1–20m each. Object position is center of its footprint at its bottom (adapter normalizes local geometry to ground). Primitive positions are local CENTERS. Cylinder size=[diameter,height,diameter], local Y axis. Only box/cylinder shapes. 1–30 objects, 1–30 parts per proposed object. No code/scripts/URLs in scene data. All step_ids must reference the analysis; every analysis step must have equipment assigned. Use all four genuine dataset geometry sets as parts inventory on the bench; their catalog dimensions are fixed, DO NOT rescale them. They are original PRINT SETS, not an assembled car. Build visually recognizable proposed equipment with multiple primitives: a bench with legs, a robot with pedestal/joints/arm/gripper, a fixture, a camera stand, and optional tool or storage station as justified. A robot capability is a proposal, NOT something observed in the human video. Keep scene compact (roughly 4x3m), arrange parts and fixture visibly on the table, and keep geometry inside room. Make assumptions explicit: unknown tolerances, forces, reach, fastener tooling, occlusion, scale of proposed equipment. No success claims.
+Rules: SI meters, Y up, Euler degrees. Room axes are [width, DEPTH, HEIGHT], 1–20m each. Object position is center of its footprint at its bottom (adapter normalizes local geometry to ground). Primitive positions are local CENTERS. Cylinder size=[diameter,height,diameter], local Y axis. Only box/cylinder shapes. 1–30 objects, 1–30 parts per proposed object. No code/scripts/URLs in scene data. All step_ids must reference the analysis; every analysis step must have equipment assigned. Use catalog assets only where relevant to the observed task; their dimensions are fixed, DO NOT rescale them or assume an inventory mesh is an assembled product. Choose equipment and its capabilities from task requirements and state assumptions; do not force a bench, robot, fixture, or camera into every scene. A robot capability is a proposal, NOT something observed in the human video. Choose room dimensions and layout appropriate to the proposed process, and keep geometry inside the room. Make assumptions explicit: unknown tolerances, forces, reach, fastener tooling, occlusion, scale of proposed equipment. No success claims.
 Video analysis:\n"""+json.dumps(analysis)+"\nSource geometry catalog:\n"+json.dumps(catalog)
         (output/"scene-prompt.txt").write_text(scene_prompt)
         status("designing","Gemini agent 2 is designing a workcell using the reconstruction and original dataset geometry catalog.")
@@ -138,9 +138,6 @@ Video analysis:\n"""+json.dumps(analysis)+"\nSource geometry catalog:\n"+json.du
                 raise ValueError("Scene references an unknown analysis step")
             covered.update(links)
         if covered!=ids:raise ValueError("Some observed steps have no proposed equipment")
-        required_assets={item["id"] for item in catalog}
-        if not required_assets.issubset({obj.get("asset_id") for obj in spec["objects"] if obj.get("kind")=="dataset"}):
-            raise ValueError("Scene omitted the original dataset geometry sets")
         write(output/"scene-spec.json",spec)
         status("compiling","Compiling the agent's scene with OpenIndustries and validating native geometry references.")
         result=subprocess.run(["node",str(ROOT/"ui/dist/compile-scene.mjs"),str(output/"scene-spec.json"),str(DATA/"geometry.json"),str(output/"workcell.oi.json")],capture_output=True,text=True,timeout=120)
@@ -154,7 +151,10 @@ Video analysis:\n"""+json.dumps(analysis)+"\nSource geometry catalog:\n"+json.du
         from compare_segments import compare_segments
         status("segmenting","Gemini agent 3 is authoring a continuous OI scene segment for every subtask.")
         generate_segments(output,key)
-        status("comparing","Gemini agent 4 is comparing actual video and OI endpoint renders.")
+        from plan_runtime import generate_runtime_plan
+        status("binding", "Binding observed tasks to supported runtime skills; unsupported operations remain explicit.")
+        generate_runtime_plan(output,key)
+        status("comparing","Gemini review agent is comparing actual video and OI endpoint renders.")
         compare_segments(output,key)
         status("ready","Video subtasks, animated OI segments and visual comparisons are ready.",duration_s=duration)
     except Exception as error:

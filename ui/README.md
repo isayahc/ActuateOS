@@ -73,25 +73,33 @@ The real live run and its limitations are documented in
 [the IndustReal example report](../docs/industreal-example.md).
 # Linked subtask playback
 
-## Live robot: observe → plan → execute → verify (default)
+## Live task graph (default)
 
-Select **step 01** and **Live robot · online planning**, optionally click **Move source part +8 cm / −4 cm**, then **Observe & run Gemini agent**. The button requests real, billable managed-agent decisions (usually two: action and post-execution review). The arm moves once the agent returns its decision. Agent status, live joint positions, path hashes, measured results and actual camera observations appear in the UI. **Pause robot / Resume robot** controls execution independently of the human video. **New execution / reconnect** creates a fresh state; prior evidence remains on disk.
+Choose **Live task graph · online planning**, then **Run task graph**. The server
+executes the run's `runtime-plan.json`, schedules ready dependencies, plans from
+current simulator state, and verifies each task's outcome. No provider calls are
+made by the run button. Task binding is a separate managed-agent interaction during
+video processing. **Run with Gemini decisions** instead preserves the billable
+observe/act/reobserve loop for every ready task. The next task waits for measured
+success and completion of the current agent review.
 
-The currently supported task is **staging a chassis beam beside the fixture**, a prerequisite to step 1's observed beam selection/frame joining. Joining the frame and steps 2–7 are unsupported by the live robot and fail explicitly. The original seven authored segments remain available in **Authored storyboard** mode. **Legacy guided parts · static arm** preserves the previous comparison baseline.
+The world persists across task selection and page reloads. **Pause / Resume**
+controls execution independently of video playback. **New execution / reconnect**
+explicitly cancels the old session and creates a fresh world. Unsupported skills
+remain visible and block dependent tasks rather than playing an animation as proof
+of execution. Existing runs require an explicit runtime plan before using live mode.
 
-The live robot has six hinge joints and two independently actuated gripper slides. The proposed link lengths, masses, friction and controller gains are engineering assumptions, not measurements from IndustReal. Its parts remain the existing scene's schematic proxies; original dataset print sets are visual-only reference inventory. The robot viewer renders actual MuJoCo link poses within the native OI world.
-
-`robot_agent.py` sends an actual current camera render and explicitly labeled simulator poses/joints to Gemini. The agent chooses `pick_place`, `finish`, or `report_failure`, with bounded retries. It cannot supply executable code, joint angles or arbitrary coordinates. `robot_runtime.py` implements a reusable contact-based skill: fresh damped-least-squares IK, sampled collision-checked Cartesian paths, joint position servos, bilateral finger-contact checks, lift verification, release, and settled-placement checks. It rejects blocked/unreachable local paths rather than claiming global motion-planning completeness. No prerecorded trajectory, storyboard track, mocap body, grasp weld, or object-pose controller is used in this mode. The skill's state machine and mechanics are predefined; motion plans depend on current observations.
-
-Artifacts under `artifacts/robot-executions/<session>/` include before/after camera PNGs, simulator observations, managed-agent interaction records, decisions, actual joint/object trajectory samples, and measured results. Saved storyboard reviews are labeled separately and are not presented as reviews of this execution.
-
-Verification:
+See [the contract, capabilities, migration and evidence documentation](../docs/task-runtime.md).
+The fixed schematic arm currently supports unrotated single-box pick-and-place;
+it does not provide arbitrary robot models, insertion, fastening or assembly skills.
 
 ```bash
-npm run test:robot                 # no API calls; shifted poses, grip failure, obstacles, pause
-LIVE_ROBOT_AGENT=1 npm run test:robot:live  # real paid agent + browser end-to-end check
-# Headless real agent execution (API key must be in the environment):
-.venv-mujoco/bin/python scripts/run_robot_agent.py RUN_ID --dx .08 --dz -.04
+# Existing compiled run; this planning command uses the configured Gemini API key:
+.venv-mujoco/bin/python scripts/plan_runtime.py RUN_ID
+# Execute its saved plan without additional provider calls:
+.venv-mujoco/bin/python scripts/run_robot_agent.py RUN_ID
+npm test
+npm run test:runtime:browser
 ```
 
 ## MuJoCo setup
@@ -103,9 +111,9 @@ npm run build
 .venv-mujoco/bin/python ui/server.py
 ```
 
-Open http://127.0.0.1:5187. The live robot uses the dedicated agent and pause buttons above. In legacy guided mode, **Play segment** advances the reference-clock dynamics. The OI renderer displays MuJoCo body states; browser keyframes are disabled in both physics modes. **Authored storyboard** explicitly selects the earlier animation.
+Open http://127.0.0.1:5187. The live robot uses the task-run and pause buttons above. In legacy guided mode, **Play segment** advances the reference-clock dynamics. The OI renderer displays MuJoCo body states; browser keyframes are disabled in both physics modes. **Authored storyboard** explicitly selects the earlier animation.
 
-For comparison, the **legacy** `Simulation` in `ui/mujoco_runtime.py` uses free workpiece bodies controlled by compliant welds to scripted mocap targets at 200 Hz, with a static arm. The new `RobotSimulation` uses articulated actuation at 500 Hz and contact-only grasping. Both adapters use the existing IndustReal workcell, not OI's unrelated farm demo.
+For comparison, the **legacy** `Simulation` in `ui/mujoco_runtime.py` uses free workpiece bodies controlled by compliant welds to scripted mocap targets at 200 Hz, with a static arm. The new `RobotSimulation` uses articulated actuation at 500 Hz and contact-only grasping. The live adapter binds objects from the selected run; its robot mechanics remain a fixed supported profile.
 
 In legacy mode, each selected segment initializes its authored starting state and rewinding reintegrates it. Live robot execution has an independent clock: video scrubbing does not rewind the robot. Saved OI animation exports remain the authored storyboard, not a robot execution program.
 
@@ -113,4 +121,4 @@ Verify physics with `.venv-mujoco/bin/python scripts/test_mujoco_runtime.py`. It
 
 On the video dashboard at http://127.0.0.1:5187, each reconstructed subtask has a matching native OI animation segment. Numbered chips select an interval; Play, scrub, previous/next and Loop control the video and scene together. The comparison below shows actual video and OI before/after images with a separate Gemini review of correspondences, differences and uncertainty. Download the selected animated segment independently.
 
-Full generation uses four managed-agent interactions: video analysis, workcell design, segment authoring and visual endpoint review. Keep the dashboard server running during generation: the review captures its actual WebGL renderer. Set `APP_URL` if using a port other than 5187; `CHROMIUM_BIN` can select the capture browser. Scene motion is a schematic workpiece replay; equipment and original print-set inventory remain stationary.
+Full generation uses five managed-agent interactions: video analysis, workcell design, segment authoring, runtime task binding and visual endpoint review. Keep the dashboard server running during generation: the review captures its actual WebGL renderer. Set `APP_URL` if using a port other than 5187; `CHROMIUM_BIN` can select the capture browser. Scene motion is a schematic workpiece replay; equipment and original print-set inventory remain stationary.

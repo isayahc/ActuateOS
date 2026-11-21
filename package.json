@@ -10,9 +10,16 @@
     "test": ".venv-mujoco/bin/python -m unittest discover -s scripts -p 'test_*.py' -v && node scripts/test_scene_compiler.mjs",
     "test:browser": "node scripts/test_video_ui.mjs",
     "test:robot": ".venv-mujoco/bin/python scripts/test_robot_runtime.py",
-    "test:robot:live": "node scripts/test_robot_ui.mjs",
-    "start": ".venv-mujoco/bin/python ui/server.py"
+    "test:robot:live": "npm run test:runtime:browser",
+    "start": ".venv-mujoco/bin/python ui/server.py",
+    "test:runtime": ".venv-mujoco/bin/python scripts/test_task_runtime.py -v",
+    "test:runtime:browser": "node scripts/test_robot_ui.mjs"
   },
-  "dependencies": {"three": "0.180.0", "ajv": "8.17.1"},
-  "devDependencies": {"esbuild": "0.25.12"}
+  "dependencies": {
+    "three": "0.180.0",
+    "ajv": "8.17.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
 }

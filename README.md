@@ -10,7 +10,7 @@ From human demonstration videos to structured processes, configurable workcells,
 
 Video-to-Workcell investigates whether specialized AI agents, explicit physical-process representations, and deterministic verification can reduce the engineering effort required to automate unfamiliar physical procedures.
 
-**Status:** A working [IndustReal video-to-workcell example](docs/industreal-example.md) with seven authored scene segments and a separate **live robot milestone**: Gemini observes the current MuJoCo scene, selects a bounded skill, and reviews its measured outcome. A six-joint proposed arm and two-finger gripper stage a schematic beam through actuator control and friction contact, with fresh trajectories planned from current poses. Source-position perturbations produce different paths. This supports a prerequisite to step 1, not full assembly or steps 2–7. Simulator ground-truth poses supplement the camera image; no benchmark or hardware-success claims are made. See [runtime setup and controls](ui/README.md).
+**Status:** Video reconstruction and OI storyboard review now feed a separate [scene-bound task runtime](docs/task-runtime.md). A validated `runtime-plan.json` binds arbitrary task/object IDs to supported skills and verification criteria. A server-owned clock executes dependent tasks in one persistent MuJoCo world, and OI displays actual runtime state. The current schematic arm supports bounded box pick-and-place; unsupported operations remain explicit and prevent full-completion claims. The benchmark video input remains IndustReal. See [runtime setup and controls](ui/README.md).
 
 ## Research motivation
 

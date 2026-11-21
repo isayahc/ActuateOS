@@ -10,6 +10,8 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 from uuid import uuid4
+from pathlib import Path
+from typing import Any
 
 import mujoco
 import numpy as np
@@ -135,29 +137,61 @@ class Simulation:
 
 
 class Runtime:
-    def __init__(self):self.sessions={};self.lock=threading.Lock()
+    """Own live execution sessions separately from reference playback sessions."""
 
-    def create(self,folder,step_id,mode="mujoco"):
-        if mode=="robot":
-            from robot_runtime import RobotSimulation
-            simulation=RobotSimulation(folder,step_id)
-        elif mode=="mujoco":simulation=Simulation(folder,step_id)
-        else:raise ValueError("Unknown runtime mode")
-        with self.lock:
-            self.sessions={key:value for key,value in self.sessions.items() if time.monotonic()-value.touched<300}
-            if len(self.sessions)>=12:raise ValueError("Too many runtime sessions; disconnect an unused viewer")
-            sid=uuid4().hex;self.sessions[sid]=simulation
-        return {"session_id":sid,**simulation.snapshot()}
+    def __init__(self) -> None:
+        """Initialize the session registry and creation lock."""
+        self.sessions: dict[str, Any] = {}
+        self.lock = threading.Lock()
 
-    def get(self,sid):
+    def create(self, folder: Path, step_id: str, mode: str = "mujoco") -> dict[str, Any]:
+        """Reconnect to a run's task execution, or initialize legacy guided playback."""
         with self.lock:
-            if sid not in self.sessions:raise ValueError("Runtime session expired; reconnect")
-            return self.sessions[sid]
+            for sid, existing in self.sessions.items():
+                if mode == "robot" and hasattr(existing, "graph") and existing.folder == folder and not existing.closed:
+                    existing.touched = time.monotonic()
+                    return {"session_id": sid, **existing.snapshot()}
+            expired = [sid for sid, value in self.sessions.items()
+                       if getattr(value, "closed", False) or (not getattr(value, "running", False) and time.monotonic()-value.touched > 300)]
+            for sid in expired:
+                value = self.sessions.pop(sid)
+                if hasattr(value, "close"): value.close()
+            if len(self.sessions) >= 12:
+                raise ValueError("Too many runtime sessions; close an unused execution")
+            if mode == "robot":
+                from task_runtime import TaskExecution
+                simulation = TaskExecution(folder)
+            elif mode == "mujoco":
+                simulation = Simulation(folder, step_id)
+            else:
+                raise ValueError("Unknown runtime mode")
+            sid = uuid4().hex
+            if mode == "robot":
+                simulation.attach(folder.parents[1] / "robot-executions" / sid)
+            self.sessions[sid] = simulation
+            return {"session_id": sid, **simulation.snapshot()}
 
-    def close(self,sid):
+    def get(self, sid: str) -> Any:
+        """Retrieve a session and update viewer activity, never its simulation clock."""
         with self.lock:
-            simulation=self.sessions.pop(sid,None)
-            if simulation is not None:simulation.closed=True
+            if sid not in self.sessions or getattr(self.sessions[sid], "closed", False):
+                raise ValueError("Runtime session expired; reconnect")
+            simulation = self.sessions[sid]
+            simulation.touched = time.monotonic()
+            return simulation
+
+    def close(self, sid: str) -> None:
+        """Cancel an execution and release its worker."""
+        with self.lock:
+            simulation = self.sessions.pop(sid, None)
+        if simulation is not None:
+            if hasattr(simulation, "close"): simulation.close()
+            else: simulation.closed = True
+
+    def shutdown(self) -> None:
+        """Stop every task worker when the HTTP server shuts down."""
+        for sid in list(self.sessions):
+            self.close(sid)
 
 
 runtime=Runtime()

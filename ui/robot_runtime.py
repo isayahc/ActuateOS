@@ -1,7 +1,7 @@
 """Online joint-space planning and contact-only manipulation in the IndustReal cell.
 
 No storyboard tracks, object pose controller, mocap bodies or grasp welds are used.
-The first supported goal is staging a beam for step_1, not completing the assembly.
+Tasks bind scene objects and targets explicitly; animation tracks are never executed.
 """
 import hashlib
 import json
@@ -10,6 +10,8 @@ import threading
 import time
 import xml.etree.ElementTree as ET
 import zlib
+from pathlib import Path
+from typing import Any
 
 import mujoco
 import numpy as np
@@ -18,42 +20,48 @@ from mujoco_runtime import numbers, quaternion
 
 
 class RobotSimulation:
-    def __init__(self, folder, step_id):
-        if step_id != "step_1":raise ValueError("Live robot milestone supports step_1 beam staging; other assembly skills are not implemented")
+    """Execute bounded scene-bound manipulation with live joints and contact checks."""
+    def __init__(self, folder: Path, task: dict[str, Any], plan: dict[str, Any]) -> None:
+        """Build one persistent scene with all bound workpieces as free bodies."""
+        step_id = task["step_id"]
+        self.task = task
+        self.plan_spec = plan
+        self.robot_id = plan["robot_id"]
+        self.movable_ids = {t["object_id"] for t in plan["tasks"] if t["skill"] == "pick_place"}
         self.folder=folder;self.step_id=step_id
         self.video_reference=next(s for s in json.loads((folder/"analysis.json").read_text())["steps"] if s["id"]==step_id)
         manifest=json.loads((folder/"segmented-workcell.oi.json").read_text())
         spec=json.loads((folder/"segmented-scene-spec.json").read_text())
-        initial=json.loads((folder/"segments-spec.json").read_text())["initial_states"]
+        initial=plan.get("initial_positions", {})
         self.instances=manifest["instances"];self.kinds={o["id"]:o["kind"] for o in spec["objects"]}
         definitions={o["id"]:o for o in spec["objects"]}
-        self.object_id="proxy_beam_left"
-        if self.object_id not in initial:raise ValueError("This cell has no supported beam geometry")
-        self.source=np.array(initial[self.object_id]["position"],float)
-        fixture=next(o for o in spec["objects"] if o["id"]=="assembly_fixture")
-        # Staging surface beside the fixture, not a claimed insertion/assembly pose.
-        self.goal=np.array([fixture["position"][0]+.28,self.source[1],fixture["position"][2]])
+        self.object_id=task["object_id"]
+        self.source=np.array(initial.get(self.object_id, next(i["position"] for i in manifest["instances"] if i["id"]==self.object_id)),float)
+        self.goal=np.array(task["target"]["position"],float)
         self.assets={a["id"]:a for a in manifest["bundledAssets"]}
-        root=ET.Element("mujoco",model="IndustReal live robot staging")
+        root=ET.Element("mujoco",model="Scene-bound task execution")
         ET.SubElement(root,"compiler",angle="radian")
         ET.SubElement(root,"option",timestep=".002",gravity="0 -9.81 0",integrator="implicitfast",iterations="80",cone="elliptic")
         defaults=ET.SubElement(root,"default")
         ET.SubElement(defaults,"geom",friction="1 .01 .001",solref=".008 1",condim="4")
         asset=ET.SubElement(root,"asset");world=ET.SubElement(root,"worldbody");act=ET.SubElement(root,"actuator")
         ET.SubElement(world,"light",pos="0 3 0",dir="0 -1 0",diffuse=".8 .8 .8")
-        eye=np.array([1.5,1.8,1.8]);z=eye-np.array([0,.85,0]);z/=np.linalg.norm(z)
+        eye=self.source+np.array([1.5,1.,1.8]);z=eye-self.source;z/=np.linalg.norm(z)
         x=np.cross([0,1,0],z);x/=np.linalg.norm(x);y=np.cross(z,x)
         ET.SubElement(world,"camera",name="observation",pos=numbers(eye),xyaxes=numbers([*x,*y]),fovy="45")
         ET.SubElement(world,"geom",name="floor",type="plane",size="5 5 .1",quat=".70710678 -.70710678 0 0",rgba=".15 .2 .17 1")
-        self.names={};self.visible={};self.object_geoms=[]
+        self.names={};self.visible={};self.workpiece_joints={};self.workpiece_geoms={}
         for i,item in enumerate(self.instances):
-            oid=item["id"];self.visible[oid]=oid not in initial and oid!="robot_arm"
-            if self.kinds[oid]=="dataset" or oid=="robot_arm" or (oid in initial and oid!=self.object_id):continue
+            oid=item["id"];self.visible[oid]=oid!=self.robot_id
+            if self.kinds[oid]=="dataset" or oid==self.robot_id:continue
             self.visible[oid]=True
-            pos=self.source if oid==self.object_id else item["position"]
+            pos=initial.get(oid,item["position"])
             name=f"object_{i}";self.names[oid]=name
             body=ET.SubElement(world,"body",name=name,pos=numbers(pos),quat=numbers(quaternion(item["rotation"])))
-            if oid==self.object_id:ET.SubElement(body,"freejoint",name="workpiece")
+            if oid in self.movable_ids:
+                self.workpiece_joints[oid]=f"workpiece_{i}"
+                self.workpiece_geoms[oid]=[]
+                ET.SubElement(body,"freejoint",name=self.workpiece_joints[oid])
             for j,part in enumerate(self.assets[item["assetId"]]["parts"]):
                 mesh=f"mesh_{i}_{j}";geom=f"geom_{i}_{j}"
                 ET.SubElement(asset,"mesh",name=mesh,vertex=numbers(part["vertices"]),face=" ".join(map(str,part["indices"])))
@@ -64,8 +72,8 @@ class RobotSimulation:
                 else:
                     ET.SubElement(body,"geom",name=geom,type="mesh",mesh=mesh,density="500",rgba=numbers([*part["color"],1]),
                                   contype="0" if oid==self.object_id else "1",conaffinity="0" if oid==self.object_id else "1")
-                if oid==self.object_id:self.object_geoms.append(geom)
-        base=next(o for o in spec["objects"] if o["id"]=="robot_arm")["position"]
+                if oid in self.movable_ids:self.workpiece_geoms[oid].append(geom)
+        base=next(o for o in self.instances if o["id"]==self.robot_id)["position"]
         pedestal=ET.SubElement(world,"body",name="robot_base",pos=numbers(base))
         ET.SubElement(pedestal,"geom",name="robot_pedestal",type="box",pos="0 .4 0",size=".11 .4 .11",rgba=".25 .28 .3 1")
         ET.SubElement(pedestal,"geom",name="robot_base_neck",type="box",pos="0 .925 0",size=".07 .125 .07",rgba=".35 .38 .4 1")
@@ -103,7 +111,7 @@ class RobotSimulation:
         self.dofs=np.array([self.model.joint(n).dofadr[0] for n in self.robot_joint_names])
         self.ranges=np.array([self.model.joint(n).range for n in self.robot_joint_names])
         self.robot_geom_ids=[i for i in range(self.model.ngeom) if (mujoco.mj_id2name(self.model,mujoco.mjtObj.mjOBJ_GEOM,i) or "").startswith("robot_")]
-        self.object_geom_ids={self.model.geom(n).id for n in self.object_geoms}
+        self.object_geom_ids={self.model.geom(n).id for n in self.workpiece_geoms[self.object_id]}
         self.finger_geom_ids={self.model.geom(f"robot_finger_{s}").id for s in ("left","right")}
         self.lock=threading.RLock();self.touched=time.monotonic()
         self.phase="idle";self.running=False;self.steps=0;self.events=[];self.result=None;self.plan=None;self.attempts=0;self.agent_status="not requested";self.closed=False
@@ -116,13 +124,28 @@ class RobotSimulation:
         for _ in range(250):mujoco.mj_step(self.model,self.data)
         self.data.time=0;self.data.qvel[:]=0
         self.start_position=self.data.xpos[self.object_body].copy()
+        self.bind_task(task)
+
+    def bind_task(self, task: dict[str, Any]) -> None:
+        """Select a new skill binding without resetting joints, workpieces or time."""
+        self.task=task;self.step_id=task["step_id"];self.object_id=task["object_id"]
+        self.video_reference=next(s for s in json.loads((self.folder/"analysis.json").read_text())["steps"] if s["id"]==self.step_id)
+        self.object_body=self.body_ids[self.object_id]
+        self.object_geom_ids={self.model.geom(n).id for n in self.workpiece_geoms[self.object_id]}
+        vertices=np.array(self.assets[next(i["assetId"] for i in self.instances if i["id"]==self.object_id)]["parts"][0]["vertices"]).reshape(-1,3)
+        self.object_size=vertices.max(axis=0)-vertices.min(axis=0)
+        self.source=self.data.xpos[self.object_body].copy();self.start_position=self.source.copy()
+        self.goal=np.array(task["target"]["position"],float)
+        self.phase="idle";self.running=False;self.result=None;self.plan=None;self.attempts=0
+        self.agent_status="not requested";self.captured_images=[]
+        self.task_started=float(self.data.time)
 
     def observe(self):
         return {"source":"MuJoCo ground-truth poses, not visual pose estimation","step_id":self.step_id,
                 "video_reference":self.video_reference,
-                "task":"Stage a chassis beam beside the fixture as a prerequisite to frame joining. Do not claim full assembly.",
-                "objects":[{"id":self.object_id,"position":self.data.xpos[self.object_body].tolist(),"size_m":[.015,.024,.1]}],
-                "targets":[{"id":"fixture_staging","position":self.goal.tolist()}],
+                "task":self.task,
+                "objects":[{"id":self.object_id,"position":self.data.xpos[self.object_body].tolist(),"size_m":self.object_size.tolist()}],
+                "targets":[{"id":self.task["target"]["id"],"position":self.goal.tolist()}],
                 "joints":self.data.qpos[self.qadr].tolist(),"phase":self.phase,"result":self.result,
                 "allowed_actions":["pick_place","finish","report_failure"],"attempts":self.attempts}
 
@@ -130,7 +153,7 @@ class RobotSimulation:
         with self.lock:
             if self.phase!="idle" or self.agent_status=="thinking":raise ValueError("Move the part before requesting a plan")
             if any(type(v) not in (int,float) or not np.isfinite(v) or abs(v)>.12 for v in (dx,dz)):raise ValueError("Part offsets must be within 12 cm")
-            q=int(self.model.joint("workpiece").qposadr[0]);self.data.qpos[q]=self.source[0]+dx;self.data.qpos[q+2]=self.source[2]+dz
+            q=int(self.model.joint(self.workpiece_joints[self.object_id]).qposadr[0]);self.data.qpos[q]=self.source[0]+dx;self.data.qpos[q+2]=self.source[2]+dz
             mujoco.mj_forward(self.model,self.data)
             self.start_position=self.data.xpos[self.object_body].copy()
             self.events.append({"event":"operator_perturbation","position":self.start_position.tolist()})
@@ -161,7 +184,7 @@ class RobotSimulation:
             current_rot=self.data.site_xmat[self.site].reshape(3,3)
             next_rot=scratch.site_xmat[self.site].reshape(3,3)
             relative=current_rot.T@(self.data.xpos[self.object_body]-self.data.site_xpos[self.site])
-            qadr=int(self.model.joint("workpiece").qposadr[0])
+            qadr=int(self.model.joint(self.workpiece_joints[self.object_id]).qposadr[0])
             scratch.qpos[qadr:qadr+3]=scratch.site_xpos[self.site]+next_rot@relative
             rotation=next_rot@current_rot.T@self.data.xmat[self.object_body].reshape(3,3)
             mujoco.mju_mat2Quat(scratch.qpos[qadr+3:qadr+7],rotation.reshape(9))
@@ -194,9 +217,9 @@ class RobotSimulation:
             action=decision.get("action")
             if action=="pick_place":
                 if self.phase not in ("idle","failed") or self.attempts>=2:raise ValueError("Pick/place unavailable in current state")
-                if decision.get("object_id")!=self.object_id or decision.get("target_id")!="fixture_staging":raise ValueError("Unknown object/target")
+                if decision.get("object_id")!=self.object_id or decision.get("target_id")!=self.task["target"]["id"]:raise ValueError("Unknown object/target")
                 self.attempts+=1;self.result=None;self.start_position=self.data.xpos[self.object_body].copy()
-                self.pick=self.start_position+np.array([0,.013,0]);self.lift_baseline=float(self.start_position[1])
+                self.pick=self.start_position+np.array([0,self.object_size[1]/2,0]);self.lift_baseline=float(self.start_position[1])
                 self.phase="approach";self.running=True;self.data.ctrl[6:]=.04
                 try:self.plan_to(self.pick+[0,.18,0])
                 except ValueError as error:self.fail(str(error))
@@ -219,7 +242,7 @@ class RobotSimulation:
     def next_phase(self):
         if self.phase=="approach":
             # Reobserve immediately before descent, allowing a changed source pose.
-            self.pick=self.data.xpos[self.object_body].copy()+[0,.013,0]
+            self.pick=self.data.xpos[self.object_body].copy()+[0,self.object_size[1]/2,0]
             self.phase="descend";self.plan_to(self.pick,True)
         elif self.phase=="descend":
             self.phase="close";self.plan=None;self.data.ctrl[6:]=0;self.phase_started=self.data.time
@@ -228,7 +251,7 @@ class RobotSimulation:
             if rise<.07 or len(self.grasp_contacts())<2:return self.fail("Grasp did not retain the part during lift")
             self.events.append({"event":"grasp_verified","rise_m":rise,"finger_contacts":2})
             self.phase="transfer";self.plan_to(self.goal+[0,.20,0],True)
-        elif self.phase=="transfer":self.phase="lower";self.plan_to(self.goal+[0,.015,0],True)
+        elif self.phase=="transfer":self.phase="lower";self.plan_to(self.goal+[0,self.object_size[1]/2+.003,0],True)
         elif self.phase=="lower":
             self.phase="release";self.plan=None;self.data.ctrl[6:]=.04;self.phase_started=self.data.time
         elif self.phase=="retreat":
@@ -253,12 +276,14 @@ class RobotSimulation:
                         self.phase="retreat";self.plan_to(self.goal+[0,.20,0],True)
                     elif self.phase=="settle" and self.data.time-self.phase_started>1:
                         position=self.data.xpos[self.object_body];error=float(np.linalg.norm(position-self.goal))
-                        joint=self.model.joint("workpiece");speed=float(np.linalg.norm(self.data.qvel[joint.dofadr[0]:joint.dofadr[0]+6]))
-                        self.result={"passed":error<.025 and speed<.05 and not self.grasp_contacts(),"position_error_m":error,"speed":speed,
-                                     "object_position":position.tolist(),"scope":"beam staging only; not frame assembly"}
+                        joint=self.model.joint(self.workpiece_joints[self.object_id]);speed=float(np.linalg.norm(self.data.qvel[joint.dofadr[0]:joint.dofadr[0]+6]))
+                        self.result={"passed":error<self.task.get("position_tolerance_m",.025) and speed<self.task.get("speed_tolerance",.05) and not self.grasp_contacts(),"position_error_m":error,"speed":speed,
+                                     "object_position":position.tolist(),"scope":"Simulated pick/place position, release and settling only; no assembly or hardware verification",
+                                     "proposed_scope":self.task["scope"]}
                         self.phase="completed" if self.result["passed"] else "failed";self.running=False
                         self.events.append({"event":"placement_verification",**self.result})
                 except ValueError as error:self.fail(str(error))
+                if self.data.time-self.task_started>120:self.fail("Task exceeded 120 simulated seconds")
                 if not self.running:break
                 mujoco.mj_step(self.model,self.data);self.steps+=1
                 if self.evidence_dir and self.steps%100==0:
@@ -293,7 +318,7 @@ class RobotSimulation:
                           "quaternion":[quat[1],quat[2],quat[3],quat[0]],"color":self.model.geom_rgba[gid,:3].tolist()})
         return {"engine":"MuJoCo","mode":"robot","version":mujoco.__version__,"step_id":self.step_id,"time_s":float(self.data.time),"steps":self.steps,
                 "contacts":self.data.ncon,"objects":objects,"robot_geoms":geoms,"joints":self.data.qpos[self.qadr].tolist(),"actuators":self.model.nu,
-                "phase":self.phase,"running":self.running,"agent_status":self.agent_status,"result":self.result,"events":self.events[-30:],
+                "phase":self.phase,"running":self.running,"view_target":self.data.xpos[self.object_body].tolist(),"agent_status":self.agent_status,"result":self.result,"events":self.events[-30:],
                 "observation":self.observe(),"evidence_id":self.evidence_dir.name if self.evidence_dir else None,"captured_images":self.captured_images,
                 "max_tracking_error_m":float(np.linalg.norm(self.data.site_xpos[self.site]-self.target)) if hasattr(self,"target") else 0,
                 "physical_execution_verified":False}
