@@ -42,7 +42,7 @@ proximity is a debugging aid, **not** semantic accuracy or a benchmark score.
 
 ## Runs
 
-**Analyze video & build workcell** starts four real, potentially billable managed-agent
+**Analyze video & build workcell** starts five real, potentially billable managed-agent
 interactions. The server loads credentials from its environment or `.env`; no key
 is sent to the browser. Progress refreshes every 2.5 seconds. Existing results can
 be viewed without credentials. No prebuilt scene replaces a failed model result.
