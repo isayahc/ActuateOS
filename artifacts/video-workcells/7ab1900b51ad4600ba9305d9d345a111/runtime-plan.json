@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "robot_id": "robot_arm",
+  "robot_profile": "parallel_gripper_v1",
+  "provenance": "Explicit local compatibility migration for the saved scene; authored engineering proposal, not model-generated or observed motion. Stage the existing single-box cross block beside the fixture using live planning. Initial position [-0.30,0.8,0.30] is an engineering staging assumption providing gripper clearance, not an observed video coordinate.",
+  "initial_positions": {"proxy_cross_block": [-0.30, 0.8, 0.30]},
+  "tasks": [
+    {"id":"stage_cross_block","step_id":"step_1","title":"Stage schematic cross block beside fixture","skill":"pick_place","object_id":"proxy_cross_block","target":{"id":"fixture_staging","position":[0.28,0.8,0.12]},"position_tolerance_m":0.025,"speed_tolerance":0.05,"scope":"Contact-verified simulated staging of the proposed cross block only; target is an engineering assumption, not an observed video coordinate. No frame joining or physical execution claim.","depends_on":[]},
+    {"id":"join_frame","step_id":"step_1","title":"Join chassis beams","skill":"unsupported","reason":"Pin insertion and frame joining controllers are not implemented.","scope":"Frame joining remains unverified.","depends_on":["stage_cross_block"]},
+    {"id":"secure_joints","step_id":"step_2","title":"Secure side joints","skill":"unsupported","reason":"Thread engagement and tightening controllers are not implemented.","scope":"Nut fastening remains unverified.","depends_on":["join_frame"]},
+    {"id":"extend_frame","step_id":"step_3","title":"Extend chassis frame","skill":"unsupported","reason":"Beam joining and fastening controllers are not implemented.","scope":"Frame extension remains unverified.","depends_on":["secure_joints"]},
+    {"id":"first_axle","step_id":"step_4","title":"Assemble first axle and wheels","skill":"unsupported","reason":"Axle insertion and wheel fastening controllers are not implemented.","scope":"Axle assembly remains unverified.","depends_on":["extend_frame"]},
+    {"id":"second_axle","step_id":"step_5","title":"Assemble second axle and bracket","skill":"unsupported","reason":"Bracket mating and axle insertion controllers are not implemented.","scope":"Second axle assembly remains unverified.","depends_on":["first_axle"]},
+    {"id":"mate_chassis","step_id":"step_6","title":"Mate wheel subassembly to chassis","skill":"unsupported","reason":"Subassembly mating controller is not implemented.","scope":"Subassembly joining remains unverified.","depends_on":["first_axle","second_axle"]},
+    {"id":"finish_chassis","step_id":"step_7","title":"Secure chassis and mount cap","skill":"unsupported","reason":"Fastening and cap insertion controllers are not implemented.","scope":"Full assembly and physical execution remain unverified.","depends_on":["mate_chassis"]}
+  ]
+}
