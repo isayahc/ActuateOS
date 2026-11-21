@@ -2,6 +2,8 @@
 
 This document specifies a starting protocol for future experiments. No experiments or results are included yet.
 
+See [Benchmark comparison matrix and planned target values](benchmark-comparison.md) for native benchmark metrics, proposed numeric thresholds, ablations, published reference anchors, and matched-trial comparison rules.
+
 ## 1. Define the experiment
 
 Record the research question, task domain, source benchmark version, dataset access conditions, and supported operation vocabulary. Define independent task-success predicates before running any system.
