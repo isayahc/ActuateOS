@@ -1,0 +1,23 @@
+{
+  "task_id": "cap-assembly-symbolic-v1",
+  "procedure": "Load a base and a cap into their respective nests on fixture_1. The two loading operations may occur in either order. After both are loaded, seat the cap on the base with a press. Inspect the seated assembly with a camera. Use only the supplied equipment and keep fixture_1 reserved during every operation.",
+  "equipment": [
+    {"id": "robot_1", "capabilities": ["pick_place"]},
+    {"id": "press_1", "capabilities": ["press_seat"]},
+    {"id": "camera_1", "capabilities": ["visual_inspect"]}
+  ],
+  "fixtures": ["fixture_1"],
+  "operations": [
+    {"id": "load_base", "capability": "pick_place", "duration_s": 2, "requires": {"base": "tray"}, "effects": {"base": "nested"}},
+    {"id": "load_cap", "capability": "pick_place", "duration_s": 2, "requires": {"cap": "tray"}, "effects": {"cap": "nested"}},
+    {"id": "seat_cap", "capability": "press_seat", "duration_s": 3, "requires": {"base": "nested", "cap": "nested"}, "effects": {"assembly": "seated"}},
+    {"id": "inspect", "capability": "visual_inspect", "duration_s": 1, "requires": {"assembly": "seated"}, "effects": {"inspection": "passed"}}
+  ],
+  "initial_state": {"base": "tray", "cap": "tray", "assembly": "unassembled", "inspection": "pending"},
+  "goal_state": {"assembly": "seated", "inspection": "passed"},
+  "assumptions": [
+    "All durations are declared toy-model constants, not measured timings.",
+    "A supported operation succeeds deterministically when its symbolic preconditions hold.",
+    "Geometry, reach, contact, force, sensor accuracy and actual inspection outcomes are not modeled."
+  ]
+}
