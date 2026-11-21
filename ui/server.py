@@ -200,7 +200,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
-        match=re.fullmatch(r"/media/robot/([0-9a-f]{32})/(before\.png|after-[12]\.png|final\.json|initial-state\.json|model\.xml|trajectory\.jsonl)",path)
+        match=re.fullmatch(r"/media/robot/([0-9a-f]{32})/(before\.png|after-[12]\.png|final\.json|initial-state\.json|model\.xml|trajectory\.jsonl|state\.json|runtime-plan\.json)",path)
         if match:
             return self.file(ARTIFACTS/"robot-executions"/match[1]/match[2],"image/png" if match[2].endswith("png") else "application/xml" if match[2].endswith("xml") else "application/json")
         if path == "/api/runtime":
@@ -230,7 +230,7 @@ class Handler(BaseHTTPRequestHandler):
                 "status":"status.json","analysis":"analysis.json","scene_spec":"segmented-scene-spec.json" if segmented else "scene-spec.json",
                 "validation":"validation.json","comparison":"comparison.json","frames":"frames.json",
                 "segments":"segments.json","segments_status":"segments-status.json","segment_comparison":"segment-comparison.json",
-                "comparison_status":"comparison-status.json","segment_evidence":"segment-evidence.json"}.items()}
+                "comparison_status":"comparison-status.json","segment_evidence":"segment-evidence.json","runtime_plan":"runtime-plan.json"}.items()}
             return self.respond(200,response)
         match=re.fullmatch(r"/api/video-runs/([0-9a-f]{32})/segments/([a-zA-Z0-9_-]+)/scene",path)
         if match:
@@ -302,21 +302,23 @@ class Handler(BaseHTTPRequestHandler):
                     simulation=runtime.get(sid)
                     if not hasattr(simulation,"advance"):raise ValueError("Robot uses its own execution clock, not video seeking")
                     return self.respond(200,simulation.advance(data.get("time_s")))
-                if self.path in ("/api/runtime/robot-tick","/api/runtime/robot-agent","/api/runtime/robot-pause","/api/runtime/robot-perturb"):
-                    simulation=runtime.get(sid)
-                    if not hasattr(simulation,"observe"):raise ValueError("Connect the live robot runtime first")
-                    if self.path.endswith("robot-tick"):return self.respond(200,simulation.tick())
-                    if self.path.endswith("robot-perturb"):return self.respond(200,simulation.perturb(data.get("dx"),data.get("dz")))
-                    if self.path.endswith("robot-pause"):
-                        if type(data.get("paused")) is not bool:raise ValueError("Expected paused boolean")
-                        with simulation.lock:
-                            if simulation.phase not in ("idle","completed","failed"):simulation.running=not data["paused"]
-                            return self.respond(200,simulation.snapshot())
-                    from robot_agent import start_agent
-                    env=credentials();key=env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
-                    if not key:raise ValueError("Set GEMINI_API_KEY to request live agent decisions")
-                    start_agent(simulation,sid,key)
-                    return self.respond(202,simulation.snapshot())
+                if self.path in ("/api/runtime/state", "/api/runtime/robot-tick", "/api/runtime/robot-start", "/api/runtime/robot-agent", "/api/runtime/robot-pause"):
+                    simulation = runtime.get(sid)
+                    if not hasattr(simulation, "graph"):
+                        raise ValueError("Connect the task runtime first")
+                    # robot-tick remains a read-only alias for older clients.
+                    if self.path.endswith(("state", "robot-tick")):
+                        return self.respond(200, simulation.snapshot())
+                    if self.path.endswith("robot-agent"):
+                        env = credentials()
+                        key = env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
+                        if not key: raise ValueError("Set GEMINI_API_KEY for managed-agent control")
+                        return self.respond(202, simulation.start(agent_key=key))
+                    if self.path.endswith("robot-start"):
+                        return self.respond(202, simulation.start())
+                    if type(data.get("paused")) is not bool:
+                        raise ValueError("Expected paused boolean")
+                    return self.respond(200, simulation.pause(data["paused"]))
                 return self.respond(404,{"error":"Unknown runtime action"})
             except (ValueError,RuntimeError,OSError,KeyError) as error:
                 return self.respond(409,{"error":str(error)})
@@ -341,4 +343,7 @@ if __name__ == "__main__":
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        pass
+    finally:
+        if runtime is not None: runtime.shutdown()
         server.server_close()
