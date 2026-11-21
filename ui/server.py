@@ -24,6 +24,8 @@ KINDS = {"workcell-trials": "Workcell planning", "managed-agents": "Runtime smok
 active = None
 lock = threading.Lock()
 
+os.environ.setdefault("MUJOCO_GL","egl")
+os.environ.setdefault("EGL_PLATFORM","surfaceless")
 try:
     from mujoco_runtime import runtime
 except ImportError:
@@ -198,6 +200,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        match=re.fullmatch(r"/media/robot/([0-9a-f]{32})/(before\.png|after-[12]\.png|final\.json|initial-state\.json|model\.xml|trajectory\.jsonl)",path)
+        if match:
+            return self.file(ARTIFACTS/"robot-executions"/match[1]/match[2],"image/png" if match[2].endswith("png") else "application/xml" if match[2].endswith("xml") else "application/json")
         if path == "/api/runtime":
             return self.respond(200,{"available":runtime is not None,"engine":"MuJoCo",
                 "message":"Ready" if runtime else "Start the server with .venv-mujoco/bin/python ui/server.py"})
@@ -288,13 +293,30 @@ class Handler(BaseHTTPRequestHandler):
                     run_id=data.get("run_id","");step_id=data.get("step_id","")
                     if not isinstance(run_id,str) or not re.fullmatch(r"[0-9a-f]{32}",run_id):raise ValueError("Invalid run")
                     if not isinstance(step_id,str):raise ValueError("Invalid step")
-                    return self.respond(200,runtime.create(ARTIFACTS/"video-workcells"/run_id,step_id))
+                    return self.respond(200,runtime.create(ARTIFACTS/"video-workcells"/run_id,step_id,data.get("mode","mujoco")))
                 sid=data.get("session_id")
                 if not isinstance(sid,str):raise ValueError("Invalid session")
                 if self.path=="/api/runtime/close":
                     runtime.close(sid);return self.respond(200,{"closed":True})
                 if self.path=="/api/runtime/advance":
-                    return self.respond(200,runtime.get(sid).advance(data.get("time_s")))
+                    simulation=runtime.get(sid)
+                    if not hasattr(simulation,"advance"):raise ValueError("Robot uses its own execution clock, not video seeking")
+                    return self.respond(200,simulation.advance(data.get("time_s")))
+                if self.path in ("/api/runtime/robot-tick","/api/runtime/robot-agent","/api/runtime/robot-pause","/api/runtime/robot-perturb"):
+                    simulation=runtime.get(sid)
+                    if not hasattr(simulation,"observe"):raise ValueError("Connect the live robot runtime first")
+                    if self.path.endswith("robot-tick"):return self.respond(200,simulation.tick())
+                    if self.path.endswith("robot-perturb"):return self.respond(200,simulation.perturb(data.get("dx"),data.get("dz")))
+                    if self.path.endswith("robot-pause"):
+                        if type(data.get("paused")) is not bool:raise ValueError("Expected paused boolean")
+                        with simulation.lock:
+                            if simulation.phase not in ("idle","completed","failed"):simulation.running=not data["paused"]
+                            return self.respond(200,simulation.snapshot())
+                    from robot_agent import start_agent
+                    env=credentials();key=env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
+                    if not key:raise ValueError("Set GEMINI_API_KEY to request live agent decisions")
+                    start_agent(simulation,sid,key)
+                    return self.respond(202,simulation.snapshot())
                 return self.respond(404,{"error":"Unknown runtime action"})
             except (ValueError,RuntimeError,OSError,KeyError) as error:
                 return self.respond(409,{"error":str(error)})

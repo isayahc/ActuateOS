@@ -137,8 +137,12 @@ class Simulation:
 class Runtime:
     def __init__(self):self.sessions={};self.lock=threading.Lock()
 
-    def create(self,folder,step_id):
-        simulation=Simulation(folder,step_id)
+    def create(self,folder,step_id,mode="mujoco"):
+        if mode=="robot":
+            from robot_runtime import RobotSimulation
+            simulation=RobotSimulation(folder,step_id)
+        elif mode=="mujoco":simulation=Simulation(folder,step_id)
+        else:raise ValueError("Unknown runtime mode")
         with self.lock:
             self.sessions={key:value for key,value in self.sessions.items() if time.monotonic()-value.touched<300}
             if len(self.sessions)>=12:raise ValueError("Too many runtime sessions; disconnect an unused viewer")
@@ -151,7 +155,9 @@ class Runtime:
             return self.sessions[sid]
 
     def close(self,sid):
-        with self.lock:self.sessions.pop(sid,None)
+        with self.lock:
+            simulation=self.sessions.pop(sid,None)
+            if simulation is not None:simulation.closed=True
 
 
 runtime=Runtime()

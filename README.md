@@ -10,7 +10,7 @@ From human demonstration videos to structured processes, configurable workcells,
 
 Video-to-Workcell investigates whether specialized AI agents, explicit physical-process representations, and deterministic verification can reduce the engineering effort required to automate unfamiliar physical procedures.
 
-**Status:** A working [IndustReal video-to-workcell example](docs/industreal-example.md): two live Gemini managed-agent interactions reconstruct sampled video evidence and author a scene rendered by native OpenIndustries code. The first run produced seven coarse steps and a ten-object conceptual workcell using original dataset geometry. Video understanding accuracy, physical feasibility, and hardware execution are not validated. The broader architecture below remains a research proposal; no benchmark scores are claimed.
+**Status:** A working [IndustReal video-to-workcell example](docs/industreal-example.md) with seven authored scene segments and a separate **live robot milestone**: Gemini observes the current MuJoCo scene, selects a bounded skill, and reviews its measured outcome. A six-joint proposed arm and two-finger gripper stage a schematic beam through actuator control and friction contact, with fresh trajectories planned from current poses. Source-position perturbations produce different paths. This supports a prerequisite to step 1, not full assembly or steps 2–7. Simulator ground-truth poses supplement the camera image; no benchmark or hardware-success claims are made. See [runtime setup and controls](ui/README.md).
 
 ## Research motivation
 
@@ -246,7 +246,9 @@ npm install
 npm run setup
 cp example.env .env
 # Set GEMINI_API_KEY in .env, then:
-python3 ui/server.py
+python3 -m venv .venv-mujoco
+.venv-mujoco/bin/python -m pip install -r requirements-mujoco.txt
+npm start
 ```
 
 Open **http://127.0.0.1:5187** to watch the real IndustReal recording, start Gemini

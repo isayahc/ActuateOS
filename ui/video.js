@@ -3,7 +3,8 @@ import {mountScene} from '/scene-viewer.js';
 const $ = id => document.getElementById(id);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const clock = value => `${Math.floor(value/60)}:${String(Math.floor(value%60)).padStart(2,'0')}`;
-let selected = null;
+const requestedRun=new URLSearchParams(location.search).get('run');
+let selected = /^[0-9a-f]{32}$/.test(requestedRun || '')?requestedRun:null;
 let current = null;
 let viewer = null;
 let loadedScene = null;
@@ -14,32 +15,59 @@ let launching = false;
 let selectedStep = null;
 let reviewSignature = '';
 let inUnsegmentedGap = false;
-let runtimeSession=null, runtimeGeneration=0, runtimeBusy=false, lastRuntimeTime=-1;
-const physicsEnabled=()=>$('motion-source').value==='mujoco';
+let runtimeSession=null, runtimeGeneration=0, runtimeBusy=false, lastRuntimeTime=-1, lastRobotState=null, robotReviewSignature='';
+const robotEnabled=()=>$('motion-source').value==='robot';
+const physicsEnabled=()=>$('motion-source').value!=='storyboard';
 const runtimeRequest=(action,body)=>api(`/api/runtime/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 function closeRuntime(){
   runtimeGeneration++;lastRuntimeTime=-1;
+  lastRobotState=null;robotReviewSignature='';
   const old=runtimeSession;runtimeSession=null;
   if(old)runtimeRequest('close',{session_id:old}).catch(()=>{});
 }
 async function connectRuntime(){
   closeRuntime();const generation=runtimeGeneration,segment=activeSegment();
   viewer?.setPhysicsMode(physicsEnabled());
+  $('robot-controls').hidden=!robotEnabled();$('robot-review').hidden=true;$('robot-log').textContent='';
+  for(const id of ['robot-run','robot-pause','robot-perturb'])$(id).disabled=true;
   $('runtime-status').dataset.state='connecting';
   if(!physicsEnabled()){
     $('runtime-status').textContent='Authored storyboard · no physics';$('runtime-metrics').textContent='Reference animation used by the saved endpoint review.';
     $('renderer-status').textContent='OpenIndustries renderer · authored storyboard';return;
   }
   if(!segment)return;
+  if(robotEnabled() && segment.step_id!=='step_1'){
+    $('runtime-status').dataset.state='error';$('runtime-status').textContent='Live robot skill not implemented for this subtask';
+    $('runtime-metrics').textContent='Select step 01 for live beam staging, or explicitly choose Authored storyboard to review this subtask’s proposal.';
+    return;
+  }
   $('runtime-status').textContent='MuJoCo · connecting…';
   try{
-    const state=await runtimeRequest('connect',{run_id:selected,step_id:segment.step_id});
+    const state=await runtimeRequest('connect',{run_id:selected,step_id:segment.step_id,mode:$('motion-source').value});
     if(generation!==runtimeGeneration){runtimeRequest('close',{session_id:state.session_id}).catch(()=>{});return;}
     runtimeSession=state.session_id;viewer?.setPhysicsState(state);showRuntime(state);
+    if(robotEnabled())viewer?.focusRobot();
   }catch(err){if(generation===runtimeGeneration){$('video').pause();$('runtime-status').dataset.state='error';$('runtime-status').textContent=`MuJoCo disconnected · ${err.message}`;}}
 }
 function showRuntime(state){
   $('runtime-status').dataset.state='ready';
+  if(state.mode==='robot'){
+    lastRobotState=state;
+    $('runtime-status').textContent=`MuJoCo · ${state.phase} · agent ${state.agent_status}`;
+    $('runtime-metrics').textContent=`Robot clock ${state.time_s.toFixed(2)}s · ${state.steps} solver steps · ${state.actuators} actuators · ${state.contacts} contacts · live joint positions ${state.joints.map(q=>q.toFixed(2)).join(', ')}`;
+    $('renderer-status').textContent='OpenIndustries ← live articulated MuJoCo robot · online IK and contact grasp';
+    $('robot-run').disabled=state.agent_status!=='not requested';
+    $('robot-perturb').disabled=state.phase!=='idle'||state.agent_status==='thinking';
+    $('robot-pause').disabled=['idle','completed','failed'].includes(state.phase);
+    $('robot-pause').textContent=state.running?'Pause robot':'Resume robot';
+    $('robot-log').textContent=state.events.map(event=>event.event==='online_plan'?`${event.phase}: planned from observed state · path ${event.sha256.slice(0,10)}`:event.event==='agent_decision'?`Gemini: ${event.decision.action} — ${event.decision.reason}`:JSON.stringify(event)).join('\n');
+    const signature=JSON.stringify([state.result,state.captured_images,state.evidence_id]);
+    if(signature!==robotReviewSignature){
+      robotReviewSignature=signature;$('robot-review').hidden=false;
+      $('robot-review').innerHTML=`<p class="eyebrow">ACTUAL ROBOT EXECUTION · STEP 1 PREREQUISITE</p><h2>${state.result?(state.result.passed?'Beam staging verified in simulation':'Execution failed — inspect evidence'):'Observe → plan → grasp → place → verify'}</h2><p class="small">Human reference: initial beam selection / frame joining. Robot scope: stage one beam beside the fixture. This does not complete frame joining. Planner inputs use simulator poses, explicitly not vision-derived estimates.</p>${state.result?`<p>${esc(JSON.stringify(state.result))}</p>`:''}<div class="endpoint-pair">${(state.captured_images||[]).map(file=>`<figure><img src="/media/robot/${state.evidence_id}/${esc(file)}" alt="Actual MuJoCo ${esc(file)} observation"><figcaption>${esc(file)} · captured during this execution</figcaption></figure>`).join('')}</div>`;
+    }
+    return;
+  }
   $('runtime-status').textContent=`MuJoCo ${state.version} · ${$('video').paused?'paused':'running'}`;
   $('runtime-metrics').textContent=`Simulation ${state.time_s.toFixed(2)}s · ${state.steps} physics steps · ${state.contacts} contacts · maximum guide error ${(state.max_tracking_error_m*1000).toFixed(1)} mm. Convex proposed-part colliders; original print sets are visual-only.`;
   $('renderer-status').textContent=`OpenIndustries renderer ← MuJoCo ${state.version} · ${state.steps} physics steps`;
@@ -47,6 +75,13 @@ function showRuntime(state){
 async function runtimeTick(){
   const segment=activeSegment(),session=runtimeSession,generation=runtimeGeneration;
   if(physicsEnabled() && segment && session && !runtimeBusy){
+    if(robotEnabled()){
+      runtimeBusy=true;
+      try{const state=await runtimeRequest('robot-tick',{session_id:session});if(generation===runtimeGeneration){viewer?.setPhysicsState(state);showRuntime(state);}}
+      catch(err){if(generation===runtimeGeneration){closeRuntime();$('runtime-status').dataset.state='error';$('runtime-status').textContent=err.message;}}
+      finally{runtimeBusy=false;setTimeout(runtimeTick,80);}
+      return;
+    }
     const target=Math.max(0,Math.min(segment.duration_s,$('video').currentTime-segment.start_s));
     if(Math.abs(target-lastRuntimeTime)>.004){
       runtimeBusy=true;
@@ -94,7 +129,7 @@ function chooseStep(id, jump=true) {
     $('segment-title').textContent=`${step.title} · ${clock(step.start_s)}–${clock(step.end_s)}`;
     document.querySelectorAll('[data-segment]').forEach(el=>el.classList.toggle('selected',el.dataset.segment===id));
     $('scene-states').innerHTML='<p class="small">Authored plan — physics may deviate. Selecting a segment initializes its authored starting state.</p>'+['before','action','after'].map(key=>`<div class="scene-state"><b>${key.toUpperCase()}</b> ${esc(segment[key])}</div>`).join('');
-    $('render-caption').textContent=`${id} · ${physicsEnabled()?'MuJoCo-driven workpieces':'authored storyboard'}`;
+    $('render-caption').textContent=`${id} · ${robotEnabled()?(id==='step_1'?'live robot execution':'authored initial layout · robot skill unavailable'):physicsEnabled()?'legacy guided workpieces':'authored storyboard'}`;
     $('download-segment').hidden=false;$('download-segment').href=`/api/video-runs/${selected}/segments/${encodeURIComponent(id)}/scene`;
     renderSegmentReview();
   }
@@ -203,7 +238,7 @@ async function refresh() {
     $('generate').textContent=running?'Gemini is working…':'Analyze video & build workcell ↗';
     const options=runs.map(run=>`<option value="${run.id}">${new Date(run.created*1000).toLocaleTimeString()} · ${esc(run.phase)}</option>`).join('');
     if($('history').innerHTML!==options)$('history').innerHTML=options || '<option>No analysis yet</option>';
-    if(!selected && runs.length)selected=runs[0].id;
+    if(!selected && runs.length)selected=(runs.find(run=>run.phase==='ready') || runs[0]).id;
     if(selected){$('history').value=selected; const id=selected;const data=await api(`/api/video-runs/${id}`);if(id===selected)await render(data,id);}
     else $('progress').textContent='Ready: real IndustReal recording loaded. Start with “Analyze video & build workcell.”';
   } catch(err) {error(err.message);}
@@ -226,7 +261,7 @@ for(const [button,delta]of [['previous-segment',-1],['next-segment',1]])$(button
 });
 $('play-segment').addEventListener('click',async()=>{
   const segment=activeSegment();if(!segment)return;
-  if(physicsEnabled() && !runtimeSession){await connectRuntime();if(!runtimeSession)return;}
+  if(physicsEnabled() && !robotEnabled() && !runtimeSession){await connectRuntime();if(!runtimeSession)return;}
   if(!$('video').paused){$('video').pause();return;}
   if($('video').currentTime<segment.start_s || $('video').currentTime>=segment.end_s-.05)seek(segment.start_s);
   try{await $('video').play();}catch(err){error(err.message);}
@@ -238,7 +273,7 @@ $('video').addEventListener('seeking',()=>{
   if(active && time>=active.start_s-.01 && time<=active.end_s+.01){inUnsegmentedGap=false;return;}
   const step=current?.analysis?.steps.find(s=>s.start_s-.01<=time && s.end_s+.01>=time);
   inUnsegmentedGap=!step;
-  if(step && step.id!==selectedStep)chooseStep(step.id,false);
+  if(step && step.id!==selectedStep && !robotEnabled())chooseStep(step.id,false);
 });
 function playbackTick(){
   const segment=activeSegment(), video=$('video');
@@ -251,7 +286,7 @@ function playbackTick(){
     $('segment-scrub').value=String(Math.round(progress*1000));
     $('segment-time').textContent=`${clock(video.currentTime)} / ${clock(segment.end_s)}`;
     $('play-segment').textContent=video.paused?'▶ Play segment':'Ⅱ Pause segment';
-    $('scene-stage').textContent=inUnsegmentedGap?'NO SEGMENT AT THIS TIME':progress<.02?'BEFORE':progress>.98?'AFTER':'ACTION';
+    $('scene-stage').textContent=robotEnabled()?(lastRobotState?.phase || 'CONNECTING'):inUnsegmentedGap?'NO SEGMENT AT THIS TIME':progress<.02?'BEFORE':progress>.98?'AFTER':'ACTION';
     const index=current.segments.segments.findIndex(item=>item.step_id===selectedStep);
     $('previous-segment').disabled=index<=0;$('next-segment').disabled=index>=current.segments.segments.length-1;
   }
@@ -260,6 +295,15 @@ function playbackTick(){
 playbackTick();
 $('motion-source').addEventListener('change',()=>{$('video').pause();connectRuntime();});
 $('reconnect-runtime').addEventListener('click',()=>{$('video').pause();connectRuntime();});
+for(const [id,action,payload]of [
+  ['robot-run','robot-agent',()=>({})],
+  ['robot-pause','robot-pause',()=>({paused:!!lastRobotState?.running})],
+  ['robot-perturb','robot-perturb',()=>({dx:.08,dz:-.04})]
+])$(id).addEventListener('click',async()=>{
+  if(!runtimeSession)return;$(id).disabled=true;const generation=runtimeGeneration;
+  try{const state=await runtimeRequest(action,{session_id:runtimeSession,...payload()});if(generation===runtimeGeneration){viewer?.setPhysicsState(state);showRuntime(state);}}
+  catch(err){error(err.message);}
+});
 window.addEventListener('pagehide',()=>{
   if(runtimeSession)fetch('/api/runtime/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:runtimeSession}),keepalive:true}).catch(()=>{});
 });

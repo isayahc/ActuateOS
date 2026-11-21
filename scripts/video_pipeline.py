@@ -66,11 +66,11 @@ def validate_analysis(value, duration):
     for node in graph:visit(node)
 
 
-def download_json(key, result, filename, output, label):
+def download_json(key, result, filename, output, label, allow_identical_duplicates=False):
     environment=quote(result["environment_id"],safe="")
     blob=request(key,f"/files/environment-{environment}:download?alt=media")
     (output/f"{label}-snapshot.tar").write_bytes(blob)
-    return read_snapshot_json(blob,filename,max_bytes=1024*1024)
+    return read_snapshot_json(blob,filename,max_bytes=1024*1024,allow_identical_duplicates=allow_identical_duplicates)
 
 
 def run(run_id):

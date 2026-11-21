@@ -6,6 +6,8 @@ import {readManifest,hydrateManifest,evaluateWorkspace} from '../.deps/OpenIndus
 export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:string)=>void) {
   const workspace=hydrateManifest(readManifest(manifest),[]);
   const world=createWorld(workspace.items.map(item=>item.asset),workspace.room,-1,-1,evaluateWorkspace(workspace.items,workspace.animation,null));
+  const robotVisual=new THREE.Group();world.scene.add(robotVisual);
+  const robotMeshes=new Map<number,THREE.Mesh>();
   const renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});
   renderer.setPixelRatio(Math.min(devicePixelRatio,2));
   renderer.outputColorSpace=THREE.SRGBColorSpace;
@@ -44,7 +46,7 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
   const tick=()=>{updatePose();controls.update();renderer.render(world.scene,camera);frame=requestAnimationFrame(tick);};tick();
   return {
     home,
-    setPhysicsMode(enabled:boolean){physicsMode=enabled;physicsState=null;},
+    setPhysicsMode(enabled:boolean){physicsMode=enabled;physicsState=null;robotVisual.visible=false;},
     setPhysicsState(state:any){
       if(!physicsMode || state.step_id!==segment?.step_id)return;
       physicsState=state;localTime=state.time_s;
@@ -53,12 +55,25 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
         const pose:any=poses.get(workspace.items[index].id);if(!pose)return;
         group.position.fromArray(pose.position);group.quaternion.fromArray(pose.quaternion);group.visible=pose.visible;
       });
+      robotVisual.visible=state.mode==='robot';
+      for(const geom of state.robot_geoms || []){
+        let mesh=robotMeshes.get(geom.id);
+        if(!mesh){
+          const geometry=geom.type===2?new THREE.SphereGeometry(geom.size[0],16,12):geom.type===3?
+            new THREE.CapsuleGeometry(geom.size[0],geom.size[1]*2,6,16).rotateX(Math.PI/2):
+            new THREE.BoxGeometry(geom.size[0]*2,geom.size[1]*2,geom.size[2]*2);
+          mesh=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color:new THREE.Color(...geom.color),roughness:.65}));
+          robotMeshes.set(geom.id,mesh);robotVisual.add(mesh);
+        }
+        mesh.position.fromArray(geom.position);mesh.quaternion.fromArray(geom.quaternion);
+      }
     },
     setSegment(next:any){
       segment=next;localTime=0;
       if(!next){segmentItems=workspace.items;applyWorldPoses(world.groups,evaluateWorkspace(workspace.items,workspace.animation,null));return;}
       const poses=new Map(next.instances.map((item:any)=>[item.id,item]));
       segmentItems=workspace.items.map(item=>({...item,...(poses.get(item.id) as any)}));
+      if(physicsMode)applyWorldPoses(world.groups,evaluateWorkspace(segmentItems,next.animation,0));
       updatePose();
     },
     setTime(seconds:number){localTime=Math.max(0,Math.min(segment?.duration_s??0,seconds));updatePose();},
@@ -68,9 +83,10 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
       const target=fixture?new THREE.Vector3(...fixture.position).add(new THREE.Vector3(0,.12,0)):new THREE.Vector3(0,.9,0);
       controls.target.copy(target);camera.position.copy(target).add(new THREE.Vector3(.65,.55,.8));controls.update();
     },
-    snapshot(){return {step_id:segment?.step_id??null,time_s:localTime,engine:physicsMode?'MuJoCo':'OI storyboard',physics:physicsState?{steps:physicsState.steps,contacts:physicsState.contacts,max_tracking_error_m:physicsState.max_tracking_error_m}:null,objects:world.groups.map((group,index)=>({id:workspace.items[index].id,position:group.position.toArray(),rotation:[group.rotation.x,group.rotation.y,group.rotation.z],visible:group.visible}))};},
+    focusRobot(){controls.target.set(0,.95,0);camera.position.set(1.3,1.75,1.65);controls.update();},
+    snapshot(){return {step_id:segment?.step_id??null,time_s:localTime,engine:physicsMode?'MuJoCo':'OI storyboard',physics:physicsState?{steps:physicsState.steps,contacts:physicsState.contacts,max_tracking_error_m:physicsState.max_tracking_error_m,mode:physicsState.mode,joints:physicsState.joints,phase:physicsState.phase,running:physicsState.running,result:physicsState.result,robot_meshes:robotMeshes.size}:null,objects:world.groups.map((group,index)=>({id:workspace.items[index].id,position:group.position.toArray(),rotation:[group.rotation.x,group.rotation.y,group.rotation.z],visible:group.visible}))};},
     highlight(ids:string[]){world.groups.forEach((group,index)=>group.traverse((child:any)=>{if(child.material?.emissive){child.material.emissive.set(ids.includes(workspace.items[index].id)?'#506e20':'#000000');child.material.emissiveIntensity=.65;}}));},
     stats:()=>world.resourceStats(),
-    dispose(){cancelAnimationFrame(frame);resize.disconnect();controls.dispose();world.dispose();renderer.dispose();container.replaceChildren();},
+    dispose(){cancelAnimationFrame(frame);resize.disconnect();controls.dispose();for(const mesh of robotMeshes.values()){mesh.geometry.dispose();(mesh.material as THREE.Material).dispose();}robotVisual.removeFromParent();world.dispose();renderer.dispose();container.replaceChildren();},
   };
 }

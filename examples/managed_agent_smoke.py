@@ -62,13 +62,16 @@ def interact(key, agent, prompt, output, turn, previous=None):
         result = json.loads(request(key, "/interactions/" + quote(result["id"], safe="")))
 
 
-def read_snapshot_json(snapshot, filename, max_bytes=65536):
+def read_snapshot_json(snapshot, filename, max_bytes=65536, allow_identical_duplicates=False):
     # Read only the requested regular file; never extract arbitrary archive paths.
     with tarfile.open(fileobj=io.BytesIO(snapshot), mode="r:*") as archive:
         matches = [
             member for member in archive.getmembers()
             if member.isfile() and PurePosixPath(member.name).name == filename
         ]
+        if allow_identical_duplicates and 1<len(matches)<=4 and all(member.size<=max_bytes for member in matches):
+            contents=[archive.extractfile(member).read() for member in matches]
+            if all(content==contents[0] for content in contents):return json.loads(contents[0])
         if len(matches) != 1 or matches[0].size > max_bytes:
             raise RuntimeError("Expected exactly one small result file in the sandbox snapshot.")
         with archive.extractfile(matches[0]) as handle:

@@ -73,7 +73,28 @@ The real live run and its limitations are documented in
 [the IndustReal example report](../docs/industreal-example.md).
 # Linked subtask playback
 
-## Live MuJoCo runtime (default motion source)
+## Live robot: observe → plan → execute → verify (default)
+
+Select **step 01** and **Live robot · online planning**, optionally click **Move source part +8 cm / −4 cm**, then **Observe & run Gemini agent**. The button requests real, billable managed-agent decisions (usually two: action and post-execution review). The arm moves once the agent returns its decision. Agent status, live joint positions, path hashes, measured results and actual camera observations appear in the UI. **Pause robot / Resume robot** controls execution independently of the human video. **New execution / reconnect** creates a fresh state; prior evidence remains on disk.
+
+The currently supported task is **staging a chassis beam beside the fixture**, a prerequisite to step 1's observed beam selection/frame joining. Joining the frame and steps 2–7 are unsupported by the live robot and fail explicitly. The original seven authored segments remain available in **Authored storyboard** mode. **Legacy guided parts · static arm** preserves the previous comparison baseline.
+
+The live robot has six hinge joints and two independently actuated gripper slides. The proposed link lengths, masses, friction and controller gains are engineering assumptions, not measurements from IndustReal. Its parts remain the existing scene's schematic proxies; original dataset print sets are visual-only reference inventory. The robot viewer renders actual MuJoCo link poses within the native OI world.
+
+`robot_agent.py` sends an actual current camera render and explicitly labeled simulator poses/joints to Gemini. The agent chooses `pick_place`, `finish`, or `report_failure`, with bounded retries. It cannot supply executable code, joint angles or arbitrary coordinates. `robot_runtime.py` implements a reusable contact-based skill: fresh damped-least-squares IK, sampled collision-checked Cartesian paths, joint position servos, bilateral finger-contact checks, lift verification, release, and settled-placement checks. It rejects blocked/unreachable local paths rather than claiming global motion-planning completeness. No prerecorded trajectory, storyboard track, mocap body, grasp weld, or object-pose controller is used in this mode. The skill's state machine and mechanics are predefined; motion plans depend on current observations.
+
+Artifacts under `artifacts/robot-executions/<session>/` include before/after camera PNGs, simulator observations, managed-agent interaction records, decisions, actual joint/object trajectory samples, and measured results. Saved storyboard reviews are labeled separately and are not presented as reviews of this execution.
+
+Verification:
+
+```bash
+npm run test:robot                 # no API calls; shifted poses, grip failure, obstacles, pause
+LIVE_ROBOT_AGENT=1 npm run test:robot:live  # real paid agent + browser end-to-end check
+# Headless real agent execution (API key must be in the environment):
+.venv-mujoco/bin/python scripts/run_robot_agent.py RUN_ID --dx .08 --dz -.04
+```
+
+## MuJoCo setup
 
 ```bash
 python3 -m venv .venv-mujoco
@@ -82,11 +103,11 @@ npm run build
 .venv-mujoco/bin/python ui/server.py
 ```
 
-Open http://127.0.0.1:5187 and press **Play segment**. The runtime indicator shows connection/running/paused state, simulation seconds, actual `mj_step` count, current contacts and maximum guide tracking error. The OI renderer displays MuJoCo `xpos`/`xquat` body states; browser keyframes are disabled in this mode. A runtime failure pauses playback and displays the error. **Reconnect runtime** retries; **Authored storyboard** explicitly selects the earlier animation.
+Open http://127.0.0.1:5187. The live robot uses the dedicated agent and pause buttons above. In legacy guided mode, **Play segment** advances the reference-clock dynamics. The OI renderer displays MuJoCo body states; browser keyframes are disabled in both physics modes. **Authored storyboard** explicitly selects the earlier animation.
 
-`ui/mujoco_runtime.py` adapts this generated workcell to MuJoCo 3.3.7. Proposed normalized OI mesh parts become convex colliders; moving proxies are free bodies, controlled by compliant welds to scripted mocap targets. Gravity and contacts are solved at 200 Hz. The robot/equipment remain static: this is guided workpiece dynamics, not articulated robot IK or a grasp/fastener controller. Original print-set meshes remain visual-only inventory. This adapter uses the IndustReal workcell, not OI's unrelated farm demo.
+For comparison, the **legacy** `Simulation` in `ui/mujoco_runtime.py` uses free workpiece bodies controlled by compliant welds to scripted mocap targets at 200 Hz, with a static arm. The new `RobotSimulation` uses articulated actuation at 500 Hz and contact-only grasping. Both adapters use the existing IndustReal workcell, not OI's unrelated farm demo.
 
-Each selected segment initializes its authored starting state. Rewinding deterministically resets/reintegrates that segment; pausing stops integration. Simulation deviations are **not** carried into the next segment. Saved endpoint comparisons and OI animation exports remain the authored storyboard and are labeled accordingly; they do not validate the live physics trajectory.
+In legacy mode, each selected segment initializes its authored starting state and rewinding reintegrates it. Live robot execution has an independent clock: video scrubbing does not rewind the robot. Saved OI animation exports remain the authored storyboard, not a robot execution program.
 
 Verify physics with `.venv-mujoco/bin/python scripts/test_mujoco_runtime.py`. It exercises every real segment, contacts, deterministic rewind, pause, independent sessions, input bounds, and freefall with guide constraints disabled. `node scripts/test_video_ui.mjs` additionally verifies live physics reaches the native OI viewer, play/pause/rewind, segment switching and mobile layout.
 

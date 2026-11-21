@@ -16,9 +16,15 @@
     <section id="segment-controls" hidden>
       <div class="segment-top"><div><span class="eyebrow">LINKED VIDEO + OI PLAYBACK</span><h2 id="segment-title">Select a subtask</h2></div><div id="segment-chips"></div></div>
       <div class="transport"><button id="previous-segment" aria-label="Previous segment">←</button><button id="play-segment">▶ Play segment</button><button id="next-segment" aria-label="Next segment">→</button><input id="segment-scrub" type="range" min="0" max="1000" value="0" aria-label="Synchronized video and scene position"><span id="segment-time"></span><label><input type="checkbox" id="loop-segment"> Loop</label></div>
-      <p class="small">Video and scene share a clock and stop at the selected boundary. MuJoCo solves guided workpiece dynamics and contacts; the proposed robot has no articulated controller.</p>
-      <div class="runtime-controls"><label>OI motion source <select id="motion-source"><option value="mujoco">Live MuJoCo dynamics</option><option value="storyboard">Authored storyboard</option></select></label><button id="reconnect-runtime">Reconnect runtime</button><strong id="runtime-status" role="status">MuJoCo · connecting…</strong></div>
+      <p class="small">Live robot execution uses its own clock. Video controls navigate the human reference. Storyboard and legacy guided modes follow the video clock.</p>
+      <div class="runtime-controls"><label>OI motion source <select id="motion-source"><option value="robot">Live robot · online planning</option><option value="mujoco">Legacy guided parts · static arm</option><option value="storyboard">Authored storyboard</option></select></label><button id="reconnect-runtime">New execution / reconnect</button><strong id="runtime-status" role="status">MuJoCo · connecting…</strong></div>
       <p id="runtime-metrics" class="small">Waiting for physics state.</p>
+      <div id="robot-controls" hidden>
+        <p class="small"><strong>First live milestone: step 1 beam staging.</strong> Gemini observes the current simulation and chooses a skill. Joint actuators and gripper contacts execute it. Full frame joining and steps 2–7 are not implemented.</p>
+        <div class="runtime-controls"><button id="robot-run" disabled>Observe & run Gemini agent</button><button id="robot-pause" disabled>Pause robot</button><button id="robot-perturb" disabled>Move source part +8 cm / −4 cm</button></div>
+        <p class="small">Agent decisions use your API key. Part perturbation changes the actual starting pose before observation. Six arm joints + two gripper actuators; no object motion tracks or grasp welds.</p>
+        <pre id="robot-log" aria-live="polite"></pre>
+      </div>
     </section>
     <div class="columns">
       <section class="card source">
@@ -36,6 +42,7 @@
       <section class="card analysis"><div class="card-title"><span>02 / WHAT GEMINI OBSERVED</span><span class="tag" id="step-count">WAITING</span></div><div id="analysis"><div class="placeholder"><span>◷</span><h2>First, understand the procedure.</h2><p>The agent will identify visible actions, objects, dependencies, and uncertainty from timestamped video frames.</p></div></div></section>
       <section class="card workcell"><div class="card-title"><span>03 / THE CORRESPONDING OI SEGMENT</span><span class="tag" id="scene-stage">OPENINDUSTRIES</span></div><div class="viewport-wrap"><div id="viewport"><div class="placeholder"><span>⌘</span><h2>A scene built from this video.</h2><p>Gemini will choose the equipment and layout. Original IndustReal geometry will be rendered alongside clearly labeled proposed equipment.</p></div></div><button id="reset-view" title="Show whole workcell" hidden>Whole workcell</button><div id="render-caption" hidden>Drag to orbit · scroll to zoom · click equipment</div></div><div id="scene-states"></div><div class="scene-content"><div id="scene-summary"><p class="small">Scene geometry and references will be checked. Robot reach, forces, collisions, and physical execution are not verified.</p></div><div id="equipment"></div><a id="download" hidden download="industreal-workcell.oi.json">Download OpenIndustries scene ↓</a><a id="download-segment" hidden download="workcell-segment.oi.json">Download this animated OI segment ↓</a></div></section>
     </div>
+    <section id="robot-review" hidden></section>
     <section id="segment-review" hidden></section>
     <section class="bottom-grid"><details id="reference"><summary>Compare with the dataset’s reference annotations <span>WITHHELD FROM GEMINI</span></summary><div id="comparison"><p>Reference comparison becomes available after analysis.</p></div></details><details><summary>Assumptions & what remains unknown</summary><div id="assumptions"><p>Video cannot establish mechanical tolerances, material properties, grip forces, or equipment reachability.</p></div></details></section>
     <footer><span>IndustReal v2 · Apache-2.0 · Schoonbeek et al.</span><span id="renderer-status">Native OpenIndustries renderer · proposed layout, not verified automation</span></footer>
