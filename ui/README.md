@@ -75,13 +75,9 @@ The real live run and its limitations are documented in
 
 ## Live task graph (default)
 
-Choose **Live task graph · online planning**, then **Run task graph**. The server
-executes the run's `runtime-plan.json`, schedules ready dependencies, plans from
-current simulator state, and verifies each task's outcome. No provider calls are
-made by the run button. Task binding is a separate managed-agent interaction during
-video processing. **Run with Gemini decisions** instead preserves the billable
-observe/act/reobserve loop for every ready task. The next task waits for measured
-success and completion of the current agent review.
+The dashboard opens with live robot planning already selected. Click **Play segment**: it requests Gemini's decisions and starts the ready tasks in the run's `runtime-plan.json`, in dependency order. The same button becomes **Pause segment / Resume segment**, then **Run again** after completion (or **Retry segment** after failure). Planning and verification have explicit progress states, and repeated clicks cannot start duplicate decisions. Unsupported skills remain explicit and block dependent tasks. The human video has its own native controls and clock; selecting a reference step does not select or reset an independent robot execution.
+
+**Advanced inspection** contains reference animation modes, execution reset, detailed logs, and an optional **Validated task dispatcher** policy that executes the saved plan without new provider calls. The default remains Gemini's billable observe/act/reobserve loop for each ready task; the next task waits for measured success and the current review. No advanced controls are required for default playback. Previous execution evidence remains on disk.
 
 The world persists across task selection and page reloads. **Pause / Resume**
 controls execution independently of video playback. **New execution / reconnect**
@@ -111,7 +107,7 @@ npm run build
 .venv-mujoco/bin/python ui/server.py
 ```
 
-Open http://127.0.0.1:5187. The live robot uses the task-run and pause buttons above. In legacy guided mode, **Play segment** advances the reference-clock dynamics. The OI renderer displays MuJoCo body states; browser keyframes are disabled in both physics modes. **Authored storyboard** explicitly selects the earlier animation.
+Open http://127.0.0.1:5187 and click **Play segment**. In the explicitly selected advanced reference modes, the button instead says **Play reference**. The OI renderer displays MuJoCo body states; browser keyframes are disabled in both physics modes. **Authored storyboard** explicitly selects the earlier animation.
 
 For comparison, the **legacy** `Simulation` in `ui/mujoco_runtime.py` uses free workpiece bodies controlled by compliant welds to scripted mocap targets at 200 Hz, with a static arm. The new `RobotSimulation` uses articulated actuation at 500 Hz and contact-only grasping. The live adapter binds objects from the selected run; its robot mechanics remain a fixed supported profile.
 

@@ -16,6 +16,22 @@ let selectedStep = null;
 let reviewSignature = '';
 let inUnsegmentedGap = false;
 let runtimeSession=null, runtimeGeneration=0, runtimeBusy=false, lastRuntimeTime=-1, lastRobotState=null, robotReviewSignature='';
+let transportBusy=false;
+function robotTransport(){
+  if(transportBusy)return {label:'Please wait…',disabled:true};
+  if(!runtimeSession)return {label:$('runtime-status').dataset.state==='error'?'Retry connection':'Connecting robot…',disabled:$('runtime-status').dataset.state!=='error',action:'connect'};
+  const state=lastRobotState;
+  if(!state)return {label:'Connecting robot…',disabled:true};
+  if(state.phase==='completed')return {label:'↻ Run again',action:'restart'};
+  if(state.phase==='blocked' && state.tasks?.some(task=>task.status==='unsupported'))return {label:'Unsupported tasks block execution',disabled:true};
+  if(state.closed || ['failed','blocked','expired','cancelled'].includes(state.phase))return {label:'↻ Retry segment',action:'restart'};
+  if(!state.started){
+    const tasks=state.tasks || [];
+    const ready=tasks.some(task=>task.status==='pending' && task.depends_on.every(id=>tasks.find(t=>t.id===id)?.status==='succeeded'));
+    return ready?{label:'▶ Play segment',action:'start'}:{label:'Robot execution not implemented',disabled:true};
+  }
+  return {label:state.running?'Ⅱ Pause segment':'▶ Resume segment',action:'pause',paused:!!state.running};
+}
 const robotEnabled=()=>$('motion-source').value==='robot';
 const physicsEnabled=()=>$('motion-source').value!=='storyboard';
 const runtimeRequest=(action,body)=>api(`/api/runtime/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -29,8 +45,10 @@ function closeRuntime(){
 async function connectRuntime(){
   closeRuntime();const generation=runtimeGeneration,segment=activeSegment();
   viewer?.setPhysicsMode(physicsEnabled());
+  $('playback-heading').textContent=robotEnabled()?'LIVE ROBOT EXECUTION':'REFERENCE INSPECTION · ROBOT NOT EXECUTING';
+  $('transport-help').textContent=robotEnabled()?'Play segment starts Gemini planning and the live robot. Pause/resume controls that same execution. The video below has its own reference playback controls.':'Reference playback only: the robot is not executing. Select Live robot in Advanced inspection to return to robot execution.';
+  $('render-caption').textContent=robotEnabled()?'Live robot execution':'Reference animation · robot not executing';
   $('robot-controls').hidden=!robotEnabled();$('robot-review').hidden=true;$('robot-log').textContent='';
-  for(const id of ['robot-run','robot-agent','robot-pause'])$(id).disabled=true;
   $('runtime-status').dataset.state='connecting';
   if(!physicsEnabled()){
     $('runtime-status').textContent='Authored storyboard · no physics';$('runtime-metrics').textContent='Reference animation used by the saved endpoint review.';
@@ -49,13 +67,11 @@ function showRuntime(state){
   $('runtime-status').dataset.state='ready';
   if(state.mode==='robot'){
     lastRobotState=state;
-    $('runtime-status').textContent=`Task runtime · ${state.phase}${state.running?' · running':''}${state.control==='managed_agent'?' · Gemini '+state.agent_status:''}`;
+    const stages={idle:'Ready',approach:'Moving to part',descend:'Approaching grasp',close:'Grasping',lift:'Lifting',transfer:'Moving part',lower:'Placing',release:'Releasing',retreat:'Retreating',settle:'Verifying',completed:'Complete',failed:'Failed',blocked:'Blocked',expired:'Expired',cancelled:'Cancelled',dispatching:'Planning next task',awaiting_agent:state.result?'Verifying…':'Planning…'};
+    const terminal=['completed','failed','blocked','expired','cancelled'].includes(state.phase);
+    $('runtime-status').textContent=`${stages[state.phase] || state.phase}${state.started&&!state.running&&!terminal?' · paused':''}${state.control==='managed_agent'?' · Gemini '+state.agent_status:''}`;
     $('runtime-metrics').textContent=`Robot clock ${state.time_s.toFixed(2)}s · ${state.steps} solver steps · ${state.actuators} actuators · ${state.contacts} contacts · live joint positions ${state.joints.map(q=>q.toFixed(2)).join(', ')}`;
     $('renderer-status').textContent='OpenIndustries ← live articulated MuJoCo robot · online IK and contact grasp';
-    $('robot-run').disabled=state.started || state.closed;
-    $('robot-agent').disabled=state.started || state.closed;
-    $('robot-pause').disabled=!state.started || ['completed','blocked','failed','expired','cancelled'].includes(state.phase);
-    $('robot-pause').textContent=state.running?'Pause execution':'Resume execution';
     $('robot-log').textContent=(state.tasks||[]).map(task=>`${task.id}: ${task.status} — ${task.title}${task.reason?' · '+task.reason:''}`).join('\n')+'\n\n'+state.events.map(event=>event.event==='online_plan'?`${event.phase}: planned from observed state · path ${event.sha256.slice(0,10)}`:event.event==='agent_decision'?`Skill request: ${event.decision.action} — ${event.decision.reason}`:JSON.stringify(event)).join('\n');
     const signature=JSON.stringify([state.tasks,state.phase,state.evidence_id]);
     if(signature!==robotReviewSignature){
@@ -261,6 +277,25 @@ for(const [button,delta]of [['previous-segment',-1],['next-segment',1]])$(button
 });
 $('play-segment').addEventListener('click',async()=>{
   const segment=activeSegment();if(!segment)return;
+  if(robotEnabled()){
+    const intent=robotTransport();if(intent.disabled)return;
+    transportBusy=true;const generation=runtimeGeneration;
+    try{
+      if(['connect','restart'].includes(intent.action)){
+        if(intent.action==='restart' && runtimeSession)await runtimeRequest('close',{session_id:runtimeSession});
+        if(generation!==runtimeGeneration)return;
+        const expectedGeneration=runtimeGeneration+1;
+        await connectRuntime();if(!runtimeSession || !robotEnabled() || runtimeGeneration!==expectedGeneration || selectedStep!==segment.step_id)return;
+        if(lastRobotState?.started)return; // Reconnect attaches to an existing execution; never starts it twice.
+      }else if(generation!==runtimeGeneration)return;
+      const activeGeneration=runtimeGeneration;
+      const state=await runtimeRequest(intent.action==='pause'?'robot-pause':$('robot-policy').value,
+        {session_id:runtimeSession,...(intent.action==='pause'?{paused:intent.paused}:{})});
+      if(activeGeneration===runtimeGeneration){viewer?.setPhysicsState(state);showRuntime(state);}
+    }catch(err){error(err.message);}
+    finally{transportBusy=false;}
+    return;
+  }
   if(physicsEnabled() && !robotEnabled() && !runtimeSession){await connectRuntime();if(!runtimeSession)return;}
   if(!$('video').paused){$('video').pause();return;}
   if($('video').currentTime<segment.start_s || $('video').currentTime>=segment.end_s-.05)seek(segment.start_s);
@@ -285,7 +320,9 @@ function playbackTick(){
     const time=Math.max(0,Math.min(segment.duration_s,video.currentTime-segment.start_s)),progress=time/segment.duration_s;
     $('segment-scrub').value=String(Math.round(progress*1000));
     $('segment-time').textContent=`${clock(video.currentTime)} / ${clock(segment.end_s)}`;
-    $('play-segment').textContent=video.paused?'▶ Play segment':'Ⅱ Pause segment';
+    const transport=robotEnabled()?robotTransport():{label:video.paused?'▶ Play reference':'Ⅱ Pause reference',disabled:false};
+    $('play-segment').textContent=transport.label;$('play-segment').disabled=!!transport.disabled;
+    $('segment-scrub').hidden=robotEnabled();$('segment-time').hidden=robotEnabled();$('loop-segment').parentElement.hidden=robotEnabled();
     $('scene-stage').textContent=robotEnabled()?(lastRobotState?.phase || 'CONNECTING'):inUnsegmentedGap?'NO SEGMENT AT THIS TIME':progress<.02?'BEFORE':progress>.98?'AFTER':'ACTION';
     const index=current.segments.segments.findIndex(item=>item.step_id===selectedStep);
     $('previous-segment').disabled=index<=0;$('next-segment').disabled=index>=current.segments.segments.length-1;
@@ -297,15 +334,6 @@ $('motion-source').addEventListener('change',()=>{$('video').pause();connectRunt
 $('reconnect-runtime').addEventListener('click',async()=>{
   $('video').pause();
   try{if(runtimeSession)await runtimeRequest('close',{session_id:runtimeSession});await connectRuntime();}
-  catch(err){error(err.message);}
-});
-for(const [id,action,payload]of [
-  ['robot-run','robot-start',()=>({})],
-  ['robot-agent','robot-agent',()=>({})],
-  ['robot-pause','robot-pause',()=>({paused:!!lastRobotState?.running})]
-])$(id).addEventListener('click',async()=>{
-  if(!runtimeSession)return;$(id).disabled=true;const generation=runtimeGeneration;
-  try{const state=await runtimeRequest(action,{session_id:runtimeSession,...payload()});if(generation===runtimeGeneration){viewer?.setPhysicsState(state);showRuntime(state);}}
   catch(err){error(err.message);}
 });
 window.addEventListener('pagehide',()=>{
