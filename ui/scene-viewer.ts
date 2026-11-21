@@ -48,7 +48,7 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
     home,
     setPhysicsMode(enabled:boolean){physicsMode=enabled;physicsState=null;robotVisual.visible=false;},
     setPhysicsState(state:any){
-      if(!physicsMode || state.step_id!==segment?.step_id)return;
+      if(!physicsMode || (state.execution!=='task_graph' && state.step_id!==segment?.step_id))return;
       physicsState=state;localTime=state.time_s;
       const poses=new Map(state.objects.map((item:any)=>[item.id,item]));
       world.groups.forEach((group,index)=>{
@@ -83,7 +83,7 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
       const target=fixture?new THREE.Vector3(...fixture.position).add(new THREE.Vector3(0,.12,0)):new THREE.Vector3(0,.9,0);
       controls.target.copy(target);camera.position.copy(target).add(new THREE.Vector3(.65,.55,.8));controls.update();
     },
-    focusRobot(){controls.target.set(0,.95,0);camera.position.set(1.3,1.75,1.65);controls.update();},
+    focusRobot(){const target=new THREE.Vector3(...(physicsState?.view_target || [0,.9,0]));controls.target.copy(target);camera.position.copy(target).add(new THREE.Vector3(1.3,.8,1.65));controls.update();},
     snapshot(){return {step_id:segment?.step_id??null,time_s:localTime,engine:physicsMode?'MuJoCo':'OI storyboard',physics:physicsState?{steps:physicsState.steps,contacts:physicsState.contacts,max_tracking_error_m:physicsState.max_tracking_error_m,mode:physicsState.mode,joints:physicsState.joints,phase:physicsState.phase,running:physicsState.running,result:physicsState.result,robot_meshes:robotMeshes.size}:null,objects:world.groups.map((group,index)=>({id:workspace.items[index].id,position:group.position.toArray(),rotation:[group.rotation.x,group.rotation.y,group.rotation.z],visible:group.visible}))};},
     highlight(ids:string[]){world.groups.forEach((group,index)=>group.traverse((child:any)=>{if(child.material?.emissive){child.material.emissive.set(ids.includes(workspace.items[index].id)?'#506e20':'#000000');child.material.emissiveIntensity=.65;}}));},
     stats:()=>world.resourceStats(),

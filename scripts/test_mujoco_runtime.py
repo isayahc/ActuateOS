@@ -13,6 +13,7 @@ from mujoco_runtime import Simulation, Runtime
 FOLDER=ROOT/"artifacts/video-workcells/7ab1900b51ad4600ba9305d9d345a111"
 
 
+@unittest.skipUnless((FOLDER / "segments.json").exists(), "Requires saved IndustReal segments; task runtime tests use self-contained fixtures")
 class PhysicsTests(unittest.TestCase):
     def test_all_segments_contact_and_rewind(self):
         segments=json.loads((FOLDER/"segments.json").read_text())["segments"]

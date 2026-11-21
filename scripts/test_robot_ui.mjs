@@ -1,50 +1,99 @@
-/** Real browser + real managed agent. Explicitly paid: LIVE_ROBOT_AGENT=1 required. */
-import {mkdirSync,writeFileSync} from 'node:fs';
-if(process.env.LIVE_ROBOT_AGENT!=='1')throw new Error('Set LIVE_ROBOT_AGENT=1 to authorize live managed-agent calls');
-const app=process.env.APP_URL||'http://127.0.0.1:5187',debug=process.env.CHROME_DEBUG_URL||'http://127.0.0.1:9225';
-const page=await(await fetch(`${debug}/json/new?about:blank`,{method:'PUT'})).json();
-const ws=new WebSocket(page.webSocketDebuggerUrl);await new Promise(resolve=>ws.addEventListener('open',resolve,{once:true}));
-let sequence=0;const pending=new Map(),errors=[];
-ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);if(!p)return;pending.delete(m.id);clearTimeout(p.timer);m.error?p.reject(new Error(JSON.stringify(m.error))):p.resolve(m.result);}if(m.method==='Runtime.exceptionThrown')errors.push(m.params);});
-const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;const timer=setTimeout(()=>reject(new Error(`CDP timeout: ${method}`)),60000);pending.set(id,{resolve,reject,timer});ws.send(JSON.stringify({id,method,params}));});
-const evaluate=async expression=>{const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true,userGesture:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;};
-const wait=async(expression,timeout=60000)=>{const end=Date.now()+timeout;while(Date.now()<end){if(await evaluate(expression))return;await new Promise(r=>setTimeout(r,100));}throw new Error(`Timeout ${expression}: ${await evaluate("document.querySelector('#runtime-status').textContent+' '+document.querySelector('#robot-log').textContent")}`);};
-const snapshot=()=>evaluate('window.workcellEvidence.playback()');
-const out='artifacts/ui-evidence';mkdirSync(out,{recursive:true});
+/** Offline native OI + HTTP + real MuJoCo task execution; no provider calls. */
+import assert from 'node:assert/strict';
+import {spawn, execFileSync} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+import {mkdtempSync, rmSync, readFileSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+
+const python=path.resolve('.venv-mujoco/bin/python');
+const freePort=()=>Number(execFileSync(python,['-c','import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()'],{encoding:'utf8'}).trim());
+const port=freePort(), debugPort=freePort(), app=`http://127.0.0.1:${port}`, debug=`http://127.0.0.1:${debugPort}`;
+const run=randomUUID().replaceAll('-',''), folder=path.resolve('artifacts/video-workcells',run), profile=mkdtempSync(path.join(tmpdir(),'workcell-browser-'));
+let server,chrome,ws,evidenceId,startupError;
+let startupLogs="";
+function monitor(child, name){child.stderr?.on("data",data=>{startupLogs=(startupLogs+String(data)).slice(-3000);});child.on("error",error=>{startupError=`${name}: ${error.message}`;});child.on("exit",code=>{startupError=`${name} exited (${code}): ${startupLogs}`;});}
+const errors=[],pending=new Map();let sequence=0;
+const evidenceIds=new Set();
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function until(fn, timeout=30000){const deadline=Date.now()+timeout;while(Date.now()<deadline){if(startupError)throw new Error(startupError);if(await fn())return;await sleep(100);}throw new Error('Timed out waiting for browser/runtime');}
+const call=(method,params={})=>new Promise((resolve,reject)=>{const id=++sequence;pending.set(id,{resolve,reject});ws.send(JSON.stringify({id,method,params}));});
+async function evaluate(expression){const r=await call('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true});if(r.exceptionDetails)throw new Error(JSON.stringify(r.exceptionDetails));return r.result.value;}
+const snapshot=()=>evaluate('window.workcellEvidence?.playback()');
 try{
-  await call('Page.enable');await call('Runtime.enable');await call('Emulation.setDeviceMetricsOverride',{width:1600,height:1300,deviceScaleFactor:1,mobile:false});
-  await call('Page.navigate',{url:`${app}/?run=7ab1900b51ad4600ba9305d9d345a111`});
-  await wait("window.workcellEvidence?.playback().physics?.mode==='robot'");
-  const initial=await snapshot();
-  if(initial.physics.robot_meshes<10)throw new Error('Articulated geometry absent');
-  if(await evaluate("document.querySelector('#advanced-inspection').open"))throw new Error('Advanced inspection must start closed');
-  await wait("document.querySelector('#play-segment').textContent.includes('Play segment') && !document.querySelector('#play-segment').disabled");
+  execFileSync(python,['scripts/prepare_test_workcell.py',folder]);
+  server=spawn(python,['ui/server.py','--port',String(port)],{stdio:['ignore','pipe','pipe']});monitor(server,'HTTP server');
+  chrome=spawn(process.env.CHROMIUM_BIN||'chromium',['--headless','--no-sandbox','--disable-dev-shm-usage','--use-angle=swiftshader','--enable-unsafe-swiftshader',`--remote-debugging-port=${debugPort}`,`--user-data-dir=${profile}`],{stdio:['ignore','ignore','pipe']});monitor(chrome,'Chromium');
+  await until(async()=>{try{return (await fetch(`${app}/api/runtime`)).ok&&(await fetch(`${debug}/json/version`)).ok;}catch{return false;}});
+  const tab=await(await fetch(`${debug}/json/new?about:blank`,{method:'PUT'})).json();
+  ws=new WebSocket(tab.webSocketDebuggerUrl);
+  await new Promise(resolve=>ws.addEventListener('open',resolve,{once:true}));
+  ws.addEventListener('message',event=>{const m=JSON.parse(event.data);if(m.id){const p=pending.get(m.id);pending.delete(m.id);if(p)m.error?p.reject(new Error(JSON.stringify(m.error))):p.resolve(m.result);}if(m.method==='Runtime.exceptionThrown')errors.push(m.params);});
+  await call('Runtime.enable');await call('Page.enable');
+  // Stub only the provider boundary: the UI must request Gemini by default,
+  // but the offline test dispatches the same real physics tasks without a key.
+  await call('Page.addScriptToEvaluateOnNewDocument',{source:`
+    const originalFetch=window.fetch.bind(window);
+    window.fetch=(url,options)=>{
+      if(url==='/api/runtime/robot-agent'){
+        sessionStorage.setItem('agentRequests',String(Number(sessionStorage.getItem('agentRequests')||0)+1));
+        return originalFetch('/api/runtime/robot-start',options);
+      }
+      return originalFetch(url,options);
+    };`});
+  await call('Page.navigate',{url:`${app}/?run=${run}`});
+  await until(async()=>(await snapshot())?.physics?.mode==='robot');
+  assert((await snapshot()).physics.robot_meshes>10);
+  assert.equal(await evaluate("document.querySelector('#advanced-inspection').open"),false);
+  await until(()=>evaluate("document.querySelector('#play-segment').textContent.includes('Play segment') && !document.querySelector('#play-segment').disabled"));
   await evaluate("document.querySelector('#play-segment').click();document.querySelector('#play-segment').click()");
-  await wait("window.workcellEvidence.playback().physics.phase==='approach'",600000);
-  await wait("window.workcellEvidence.playback().physics.steps>150");
-  const moving=await snapshot();
-  if(!await evaluate("document.querySelector('#error').hidden"))throw new Error('Primary play produced a UI error (possibly a duplicate decision)');
-  if(!await evaluate("document.querySelector('#video').paused && document.querySelector('#video').currentTime===0"))throw new Error('Robot Play unexpectedly drove reference-video playback');
-  if(moving.physics.joints.every((q,i)=>Math.abs(q-initial.physics.joints[i])<.01))throw new Error('Robot joints stayed static');
+  await until(async()=>(await snapshot())?.physics?.steps>50);
+  assert.equal(await evaluate("sessionStorage.getItem('agentRequests')"),'1');
+  assert(await evaluate("document.querySelector('#video').paused && document.querySelector('#error').hidden"));
   await evaluate("document.querySelector('#play-segment').click()");
-  await wait('window.workcellEvidence.playback().physics.running===false');
-  const paused=await snapshot();await new Promise(r=>setTimeout(r,350));
-  if((await snapshot()).time_s!==paused.time_s)throw new Error('Pause did not stop physics');
+  await until(async()=>(await snapshot())?.physics?.running===false);
+  const paused=await snapshot();await sleep(250);
+  assert.equal((await snapshot()).time_s,paused.time_s);
+  await evaluate("document.querySelector('[data-segment=observed_beta]').click()");
+  await sleep(200);assert.equal((await snapshot()).time_s,paused.time_s,'Selecting a reference task must not reset physics');
   await evaluate("document.querySelector('#play-segment').click()");
-  await wait("document.querySelector('#robot-log').textContent.includes('grasp_verified')",600000);
-  await evaluate("document.querySelector('#viewport').scrollIntoView({block:'center'})");
-  let image=await call('Page.captureScreenshot',{format:'png'});writeFileSync(`${out}/robot-live-execution.png`,Buffer.from(image.data,'base64'));
-  await wait("document.querySelector('#play-segment').textContent.includes('Run again')",600000);
-  const final=await snapshot();if(!final.physics.result?.passed)throw new Error('No measured placement success');
-  await wait("document.querySelectorAll('#robot-review img').length>=2 && [...document.querySelectorAll('#robot-review img')].every(i=>i.complete&&i.naturalWidth>0)");
-  image=await call('Page.captureScreenshot',{format:'png'});writeFileSync(`${out}/robot-live-final.png`,Buffer.from(image.data,'base64'));
-  writeFileSync(`${out}/robot-browser-checks.json`,JSON.stringify({live_execution_passed:true,initial,moving,final,errors},null,2));
+  await until(async()=>(await snapshot())?.time_s>paused.time_s);
+  evidenceId=await evaluate("document.querySelector('#robot-review a').href.split('/').at(-2)");
+  evidenceIds.add(evidenceId);
+  const before=await snapshot();
+  await call('Page.navigate',{url:'about:blank'});await sleep(500);
+  await call('Page.navigate',{url:`${app}/?run=${run}`});
+  await until(async()=>(await snapshot())?.physics?.steps>before.physics.steps);
+  assert.equal(await evaluate("document.querySelector('#robot-review a').href.split('/').at(-2)"),evidenceId,'Reconnect must retain the same execution');
+  await until(async()=>(await snapshot())?.physics?.phase==='completed',90000);
+  const saved=JSON.parse(readFileSync(path.resolve('artifacts/robot-executions',evidenceId,'state.json'),'utf8'));
+  assert.deepEqual(saved.tasks.map(t=>t.status),['succeeded','succeeded']);
+  assert.equal((await snapshot()).physics.result.passed,true);
+  await until(()=>evaluate("document.querySelector('#play-segment').textContent.includes('Run again')"));
+  await evaluate("document.querySelector('#play-segment').click()");
+  await until(async()=>{
+    const id=await evaluate("document.querySelector('#robot-review a')?.href.split('/').at(-2)");
+    if(id && id!==evidenceId){evidenceIds.add(id);return (await snapshot())?.physics?.steps>0;}
+    return false;
+  });
+  assert.equal(await evaluate("sessionStorage.getItem('agentRequests')"),'2','Run again must replace the terminal execution exactly once');
+  await evaluate("document.querySelector('#play-segment').click()");
+  await until(async()=>(await snapshot())?.physics?.running===false);
+  const planPath=path.join(folder,'runtime-plan.json'),plan=JSON.parse(readFileSync(planPath,'utf8'));
+  plan.initial_positions={};plan.tasks.forEach(task=>{task.skill='unsupported';task.reason='No assembly controller in offline fixture';});
+  writeFileSync(planPath,JSON.stringify(plan));
+  await evaluate("document.querySelector('#advanced-inspection').open=true;document.querySelector('#reconnect-runtime').click()");
+  await until(()=>evaluate("document.querySelector('#play-segment').disabled && document.querySelector('#play-segment').textContent.includes('not implemented')"));
+  evidenceIds.add(await evaluate("document.querySelector('#robot-review a').href.split('/').at(-2)"));
+  assert.equal(await evaluate("sessionStorage.getItem('agentRequests')"),'2','Unsupported tasks must not trigger a provider request');
   await call('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true});
-  await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
-  if(!await evaluate('document.documentElement.scrollWidth<=390'))throw new Error('Mobile overflow');
-  if(errors.length)throw new Error(JSON.stringify(errors));
-  await evaluate("document.querySelectorAll('[data-segment]')[1].click()");
-  await wait("document.querySelector('#play-segment').disabled && document.querySelector('#play-segment').textContent.includes('not implemented')");
-  writeFileSync(`${out}/robot-browser-checks.json`,JSON.stringify({passed:true,initial,moving,final,errors},null,2));
-  console.log('PASS: default Play starts real robot/Gemini, repeated clicks guarded, same-button pause/resume, completed execution, evidence, mobile layout and unsupported segment guard.');
-}finally{ws.close();await fetch(`${debug}/json/close/${page.id}`);}
+  await sleep(200);assert(await evaluate('document.documentElement.scrollWidth<=390'),'Mobile overflow');
+  assert.deepEqual(errors,[]);
+  console.log('PASS: primary Play/provider routing, duplicate-click guard, two real physics tasks, same-button pause/resume, persistent selection/reconnect, rerun, unsupported guard and mobile layout (provider stubbed).');
+}finally{
+  ws?.close();chrome?.kill();server?.kill('SIGINT');
+  await sleep(500);
+  rmSync(folder,{recursive:true,force:true});
+  for(const id of evidenceIds)rmSync(path.resolve('artifacts/robot-executions',id),{recursive:true,force:true});
+  rmSync(profile,{recursive:true,force:true});
+}

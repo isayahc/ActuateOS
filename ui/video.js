@@ -18,25 +18,29 @@ let inUnsegmentedGap = false;
 let runtimeSession=null, runtimeGeneration=0, runtimeBusy=false, lastRuntimeTime=-1, lastRobotState=null, robotReviewSignature='';
 let transportBusy=false;
 function robotTransport(){
-  if(selectedStep!=='step_1')return {label:'Robot execution not implemented',disabled:true};
   if(transportBusy)return {label:'Please wait…',disabled:true};
   if(!runtimeSession)return {label:$('runtime-status').dataset.state==='error'?'Retry connection':'Connecting robot…',disabled:$('runtime-status').dataset.state!=='error',action:'connect'};
   const state=lastRobotState;
   if(!state)return {label:'Connecting robot…',disabled:true};
-  if(state.agent_status==='thinking')return {label:state.phase==='idle'?'Planning…':'Verifying…',disabled:true};
-  if(state.agent_status==='not requested')return {label:'▶ Play segment',action:'start'};
-  if(['verified by agent','agent reported failure','agent error','decision budget exhausted'].includes(state.agent_status))return {label:state.result?.passed?'↻ Run again':'↻ Retry segment',action:'restart'};
-  if(['completed','failed'].includes(state.phase))return {label:'Verifying…',disabled:true};
+  if(state.phase==='completed')return {label:'↻ Run again',action:'restart'};
+  if(state.phase==='blocked' && state.tasks?.some(task=>task.status==='unsupported'))return {label:'Unsupported tasks block execution',disabled:true};
+  if(state.closed || ['failed','blocked','expired','cancelled'].includes(state.phase))return {label:'↻ Retry segment',action:'restart'};
+  if(!state.started){
+    const tasks=state.tasks || [];
+    const ready=tasks.some(task=>task.status==='pending' && task.depends_on.every(id=>tasks.find(t=>t.id===id)?.status==='succeeded'));
+    return ready?{label:'▶ Play segment',action:'start'}:{label:'Robot execution not implemented',disabled:true};
+  }
   return {label:state.running?'Ⅱ Pause segment':'▶ Resume segment',action:'pause',paused:!!state.running};
 }
 const robotEnabled=()=>$('motion-source').value==='robot';
 const physicsEnabled=()=>$('motion-source').value!=='storyboard';
 const runtimeRequest=(action,body)=>api(`/api/runtime/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
 function closeRuntime(){
+  const wasTaskExecution=lastRobotState?.execution==='task_graph';
   runtimeGeneration++;lastRuntimeTime=-1;
   lastRobotState=null;robotReviewSignature='';
   const old=runtimeSession;runtimeSession=null;
-  if(old)runtimeRequest('close',{session_id:old}).catch(()=>{});
+  if(old && !wasTaskExecution)runtimeRequest('close',{session_id:old}).catch(()=>{});
 }
 async function connectRuntime(){
   closeRuntime();const generation=runtimeGeneration,segment=activeSegment();
@@ -45,22 +49,16 @@ async function connectRuntime(){
   $('transport-help').textContent=robotEnabled()?'Play segment starts Gemini planning and the live robot. Pause/resume controls that same execution. The video below has its own reference playback controls.':'Reference playback only: the robot is not executing. Select Live robot in Advanced inspection to return to robot execution.';
   $('render-caption').textContent=robotEnabled()?'Live robot execution':'Reference animation · robot not executing';
   $('robot-controls').hidden=!robotEnabled();$('robot-review').hidden=true;$('robot-log').textContent='';
-  $('robot-perturb').disabled=true;
   $('runtime-status').dataset.state='connecting';
   if(!physicsEnabled()){
     $('runtime-status').textContent='Authored storyboard · no physics';$('runtime-metrics').textContent='Reference animation used by the saved endpoint review.';
     $('renderer-status').textContent='OpenIndustries renderer · authored storyboard';return;
   }
   if(!segment)return;
-  if(robotEnabled() && segment.step_id!=='step_1'){
-    $('runtime-status').dataset.state='error';$('runtime-status').textContent='Live robot skill not implemented for this subtask';
-    $('runtime-metrics').textContent='Select step 01 for live beam staging, or explicitly choose Authored storyboard to review this subtask’s proposal.';
-    return;
-  }
   $('runtime-status').textContent='MuJoCo · connecting…';
   try{
     const state=await runtimeRequest('connect',{run_id:selected,step_id:segment.step_id,mode:$('motion-source').value});
-    if(generation!==runtimeGeneration){runtimeRequest('close',{session_id:state.session_id}).catch(()=>{});return;}
+    if(generation!==runtimeGeneration){if(state.execution!=='task_graph')runtimeRequest('close',{session_id:state.session_id}).catch(()=>{});return;}
     runtimeSession=state.session_id;viewer?.setPhysicsState(state);showRuntime(state);
     if(robotEnabled())viewer?.focusRobot();
   }catch(err){if(generation===runtimeGeneration){$('video').pause();$('runtime-status').dataset.state='error';$('runtime-status').textContent=`MuJoCo disconnected · ${err.message}`;}}
@@ -69,16 +67,16 @@ function showRuntime(state){
   $('runtime-status').dataset.state='ready';
   if(state.mode==='robot'){
     lastRobotState=state;
-    const stages={idle:'Ready',approach:'Moving to part',descend:'Approaching grasp',close:'Grasping',lift:'Lifting',transfer:'Moving part',lower:'Placing',release:'Releasing',retreat:'Retreating',settle:'Verifying',completed:'Complete',failed:'Failed'};
-    $('runtime-status').textContent=state.agent_status==='thinking'?(state.phase==='idle'?'Planning…':'Verifying…'):state.agent_status==='executing'&&['completed','failed'].includes(state.phase)?'Verifying…':state.agent_status==='agent error'?'Agent failed — retry segment':`${stages[state.phase] || state.phase}${!state.running&&!['idle','completed','failed'].includes(state.phase)?' · paused':''}`;
+    const stages={idle:'Ready',approach:'Moving to part',descend:'Approaching grasp',close:'Grasping',lift:'Lifting',transfer:'Moving part',lower:'Placing',release:'Releasing',retreat:'Retreating',settle:'Verifying',completed:'Complete',failed:'Failed',blocked:'Blocked',expired:'Expired',cancelled:'Cancelled',dispatching:'Planning next task',awaiting_agent:state.result?'Verifying…':'Planning…'};
+    const terminal=['completed','failed','blocked','expired','cancelled'].includes(state.phase);
+    $('runtime-status').textContent=`${stages[state.phase] || state.phase}${state.started&&!state.running&&!terminal?' · paused':''}${state.control==='managed_agent'?' · Gemini '+state.agent_status:''}`;
     $('runtime-metrics').textContent=`Robot clock ${state.time_s.toFixed(2)}s · ${state.steps} solver steps · ${state.actuators} actuators · ${state.contacts} contacts · live joint positions ${state.joints.map(q=>q.toFixed(2)).join(', ')}`;
     $('renderer-status').textContent='OpenIndustries ← live articulated MuJoCo robot · online IK and contact grasp';
-    $('robot-perturb').disabled=state.phase!=='idle'||state.agent_status==='thinking';
-    $('robot-log').textContent=state.events.map(event=>event.event==='online_plan'?`${event.phase}: planned from observed state · path ${event.sha256.slice(0,10)}`:event.event==='agent_decision'?`Gemini: ${event.decision.action} — ${event.decision.reason}`:JSON.stringify(event)).join('\n');
-    const signature=JSON.stringify([state.result,state.captured_images,state.evidence_id]);
+    $('robot-log').textContent=(state.tasks||[]).map(task=>`${task.id}: ${task.status} — ${task.title}${task.reason?' · '+task.reason:''}`).join('\n')+'\n\n'+state.events.map(event=>event.event==='online_plan'?`${event.phase}: planned from observed state · path ${event.sha256.slice(0,10)}`:event.event==='agent_decision'?`Skill request: ${event.decision.action} — ${event.decision.reason}`:JSON.stringify(event)).join('\n');
+    const signature=JSON.stringify([state.tasks,state.phase,state.evidence_id]);
     if(signature!==robotReviewSignature){
       robotReviewSignature=signature;$('robot-review').hidden=false;
-      $('robot-review').innerHTML=`<p class="eyebrow">ACTUAL ROBOT EXECUTION · STEP 1 PREREQUISITE</p><h2>${state.result?(state.result.passed?'Beam staging verified in simulation':'Execution failed — inspect evidence'):'Observe → plan → grasp → place → verify'}</h2><p class="small">Human reference: initial beam selection / frame joining. Robot scope: stage one beam beside the fixture. This does not complete frame joining. Planner inputs use simulator poses, explicitly not vision-derived estimates.</p>${state.result?`<p>${esc(JSON.stringify(state.result))}</p>`:''}<div class="endpoint-pair">${(state.captured_images||[]).map(file=>`<figure><img src="/media/robot/${state.evidence_id}/${esc(file)}" alt="Actual MuJoCo ${esc(file)} observation"><figcaption>${esc(file)} · captured during this execution</figcaption></figure>`).join('')}</div>`;
+      $('robot-review').innerHTML=`<p class="eyebrow">RUNTIME TASK GRAPH</p><h2>${state.phase==='completed'?'All bound tasks verified in simulation':'Observe → dispatch → execute → verify'}</h2><p class="small">${esc(state.scope)}. Runtime state persists across task selection; video seeking does not advance or reset execution.</p><ul>${(state.tasks||[]).map(task=>`<li><strong>${esc(task.title)}</strong> · ${esc(task.status)}<br>${esc(task.scope)}${task.reason?`<br>${esc(task.reason)}`:''}${task.result?`<br>${esc(JSON.stringify(task.result))}`:''}</li>`).join('')}</ul>${state.evidence_id?`<a href="/media/robot/${state.evidence_id}/state.json" target="_blank">Execution state and results</a>`:''}`;
     }
     return;
   }
@@ -91,7 +89,7 @@ async function runtimeTick(){
   if(physicsEnabled() && segment && session && !runtimeBusy){
     if(robotEnabled()){
       runtimeBusy=true;
-      try{const state=await runtimeRequest('robot-tick',{session_id:session});if(generation===runtimeGeneration){viewer?.setPhysicsState(state);showRuntime(state);}}
+      try{const state=await runtimeRequest('state',{session_id:session});if(generation===runtimeGeneration){viewer?.setPhysicsState(state);showRuntime(state);}}
       catch(err){if(generation===runtimeGeneration){closeRuntime();$('runtime-status').dataset.state='error';$('runtime-status').textContent=err.message;}}
       finally{runtimeBusy=false;setTimeout(runtimeTick,80);}
       return;
@@ -138,12 +136,13 @@ function chooseStep(id, jump=true) {
     viewer?.setSegment(segment);
     viewer?.setClock(()=>Math.max(0,Math.min(segment.duration_s,$('video').currentTime-segment.start_s)));
     viewer?.focusSegment();
-    connectRuntime();
+    if(robotEnabled() && runtimeSession && lastRobotState?.execution==='task_graph')viewer?.setPhysicsState(lastRobotState);
+    else connectRuntime();
     $('segment-controls').hidden=false;
     $('segment-title').textContent=`${step.title} · ${clock(step.start_s)}–${clock(step.end_s)}`;
     document.querySelectorAll('[data-segment]').forEach(el=>el.classList.toggle('selected',el.dataset.segment===id));
-    $('scene-states').innerHTML='<p class="small">Authored plan — physics may deviate. Selecting a segment initializes its authored starting state.</p>'+['before','action','after'].map(key=>`<div class="scene-state"><b>${key.toUpperCase()}</b> ${esc(segment[key])}</div>`).join('');
-    $('render-caption').textContent=`${id} · ${robotEnabled()?(id==='step_1'?'live robot execution':'authored initial layout · robot skill unavailable'):physicsEnabled()?'legacy guided workpieces':'authored storyboard'}`;
+    $('scene-states').innerHTML='<p class="small">Authored plan — physics may deviate. Storyboard selection is for review; task execution preserves its own world state.</p>'+['before','action','after'].map(key=>`<div class="scene-state"><b>${key.toUpperCase()}</b> ${esc(segment[key])}</div>`).join('');
+    $('render-caption').textContent=`${id} · ${robotEnabled()?'persistent task execution':physicsEnabled()?'legacy guided workpieces':'authored storyboard'}`;
     $('download-segment').hidden=false;$('download-segment').href=`/api/video-runs/${selected}/segments/${encodeURIComponent(id)}/scene`;
     renderSegmentReview();
   }
@@ -191,13 +190,14 @@ function clearRun() {
 }
 
 async function render(data, runId) {
+  const runtimePlanBecameAvailable=!current?.runtime_plan && !!data.runtime_plan;
   current=data;
   const phase=data.status?.phase;
   $('progress').textContent=data.status?.message || 'Loading…';
   if(data.segments_status && !['ready','failed'].includes(data.segments_status.phase))$('progress').textContent=data.segments_status.message;
   if(data.comparison_status && data.comparison_status.phase!=='ready')$('progress').textContent=data.comparison_status.message;
   $('phase-analysis').className=`phase ${data.analysis?'done':['sampling','analyzing'].includes(phase)?'current working':''}`;
-  $('phase-scene').className=`phase ${phase==='ready'?'done':['designing','compiling','segmenting','comparing'].includes(phase)?'current working':''}`;
+  $('phase-scene').className=`phase ${phase==='ready'?'done':['designing','compiling','segmenting','binding','comparing'].includes(phase)?'current working':''}`;
   if (phase==='failed')error(data.status.message);
   if (data.analysis && renderedAnalysis!==runId) {
     renderedAnalysis=runId;
@@ -216,6 +216,7 @@ async function render(data, runId) {
   const assumptions=[...(data.analysis?.uncertainties || []),...(data.scene_spec?.assumptions || []),...(data.validation?.warnings || []),...(data.segments?.assumptions || [])];
   if(assumptions.length)$('assumptions').innerHTML='<ul>'+assumptions.map(text=>`<li>${esc(text)}</li>`).join('')+'</ul>';
   const sceneKey=`${runId}:${data.segments?'segmented':'static'}`;
+  const sceneWasLoaded=loadedScene===sceneKey;
   if(data.validation?.native_manifest_valid && loadedScene!==sceneKey) {
     loadedScene=sceneKey;
     try {
@@ -241,6 +242,7 @@ async function render(data, runId) {
       error(err.message);
     }
   }
+  if(runtimePlanBecameAvailable && sceneWasLoaded && robotEnabled() && !runtimeSession)await connectRuntime();
   if(activeSegment())renderSegmentReview();
 }
 
@@ -280,11 +282,14 @@ $('play-segment').addEventListener('click',async()=>{
     transportBusy=true;const generation=runtimeGeneration;
     try{
       if(['connect','restart'].includes(intent.action)){
+        if(intent.action==='restart' && runtimeSession)await runtimeRequest('close',{session_id:runtimeSession});
+        if(generation!==runtimeGeneration)return;
         const expectedGeneration=runtimeGeneration+1;
         await connectRuntime();if(!runtimeSession || !robotEnabled() || runtimeGeneration!==expectedGeneration || selectedStep!==segment.step_id)return;
+        if(lastRobotState?.started)return; // Reconnect attaches to an existing execution; never starts it twice.
       }else if(generation!==runtimeGeneration)return;
       const activeGeneration=runtimeGeneration;
-      const state=await runtimeRequest(intent.action==='pause'?'robot-pause':'robot-agent',
+      const state=await runtimeRequest(intent.action==='pause'?'robot-pause':$('robot-policy').value,
         {session_id:runtimeSession,...(intent.action==='pause'?{paused:intent.paused}:{})});
       if(activeGeneration===runtimeGeneration){viewer?.setPhysicsState(state);showRuntime(state);}
     }catch(err){error(err.message);}
@@ -326,16 +331,13 @@ function playbackTick(){
 }
 playbackTick();
 $('motion-source').addEventListener('change',()=>{$('video').pause();connectRuntime();});
-$('reconnect-runtime').addEventListener('click',()=>{$('video').pause();connectRuntime();});
-for(const [id,action,payload]of [
-  ['robot-perturb','robot-perturb',()=>({dx:.08,dz:-.04})]
-])$(id).addEventListener('click',async()=>{
-  if(!runtimeSession)return;$(id).disabled=true;const generation=runtimeGeneration;
-  try{const state=await runtimeRequest(action,{session_id:runtimeSession,...payload()});if(generation===runtimeGeneration){viewer?.setPhysicsState(state);showRuntime(state);}}
+$('reconnect-runtime').addEventListener('click',async()=>{
+  $('video').pause();
+  try{if(runtimeSession)await runtimeRequest('close',{session_id:runtimeSession});await connectRuntime();}
   catch(err){error(err.message);}
 });
 window.addEventListener('pagehide',()=>{
-  if(runtimeSession)fetch('/api/runtime/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:runtimeSession}),keepalive:true}).catch(()=>{});
+  if(runtimeSession && lastRobotState?.execution!=='task_graph')fetch('/api/runtime/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:runtimeSession}),keepalive:true}).catch(()=>{});
 });
 runtimeTick();
 async function poll(){await refresh();setTimeout(poll,2500);}

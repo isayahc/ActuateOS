@@ -22,9 +22,9 @@
       <details id="advanced-inspection"><summary>Advanced inspection · reference animations and diagnostics</summary>
       <div class="runtime-controls"><label>OI motion source <select id="motion-source"><option value="robot">Live robot · online planning</option><option value="mujoco">Legacy guided parts · static arm</option><option value="storyboard">Authored storyboard</option></select></label><button id="reconnect-runtime">New execution / reconnect</button></div>
       <div id="robot-controls" hidden>
-        <p class="small"><strong>First live milestone: step 1 beam staging.</strong> Gemini observes the current simulation and chooses a skill. Joint actuators and gripper contacts execute it. Full frame joining and steps 2–7 are not implemented.</p>
-        <div class="runtime-controls"><button id="robot-perturb" disabled>Move source part +8 cm / −4 cm</button></div>
-        <p class="small">Agent decisions use your API key. Part perturbation changes the actual starting pose before observation. Six arm joints + two gripper actuators; no object motion tracks or grasp welds.</p>
+        <p class="small"><strong>Scene-bound task execution.</strong> Ready tasks use live joint planning and contact verification. Dependencies unlock only after measured success. Unsupported operations remain explicit; video selection does not reset the execution.</p>
+        <label>Decision policy <select id="robot-policy"><option value="robot-agent">Gemini decisions (default)</option><option value="robot-start">Validated task dispatcher · no provider calls</option></select></label>
+        <p class="small">Gemini decisions use your API key. The task dispatcher executes the saved plan without new provider calls. Both use live joint planning and contact verification.</p>
         <pre id="robot-log" aria-live="polite"></pre>
       </div>
       </details>
