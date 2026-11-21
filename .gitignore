@@ -1,7 +1,9 @@
 # Local configuration and credentials
 .env
 .env.*
+*.env
 !.env.example
+!example.env
 
 # Downloaded datasets and generated experiment artifacts
 /data/

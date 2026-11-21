@@ -8,7 +8,7 @@ From human demonstration videos to structured processes, configurable workcells,
 
 Video-to-Workcell investigates whether specialized AI agents, explicit physical-process representations, and deterministic verification can reduce the engineering effort required to automate unfamiliar physical procedures.
 
-**Status:** Research specification. This repository currently contains documentation, not an implemented agent pipeline, simulator, hardware controller, or experimentally validated system. All architecture, integrations, and experiments below are proposed unless stated otherwise. No benchmark results are claimed.
+**Status:** Research specification with a [Gemini Managed Agents runtime smoke test](examples/README.md). Live smoke-test verification is pending API credentials. The research pipeline, simulator integration, and hardware controller are not implemented. All architecture, integrations, and experiments below are proposed unless stated otherwise. No benchmark results are claimed.
 
 ## Research motivation
 
@@ -230,7 +230,7 @@ git clone https://github.com/isayahc/video-to-workcell.git
 cd video-to-workcell
 ```
 
-Start with the architecture and evaluation plan above. There are currently no runtime dependencies, installation steps, or executable demos. Implementation work should make assumptions, supported operations, and verification boundaries explicit.
+Start with the architecture and evaluation plan above. To try the managed runtime, follow the [Gemini Managed Agents smoke-test instructions](examples/README.md). The sample requires Python 3.10+ and a Gemini API key, with no third-party dependencies. Implementation work should make assumptions, supported operations, and verification boundaries explicit.
 
 ## Limitations
 
