@@ -65,5 +65,60 @@ video ingestion requires a separately verified integration strategy.
 
 ## Verification status
 
-Live E2E verification is pending API credentials. Local syntax and missing-key
-behavior can be checked without making paid calls; neither establishes API access.
+The live runtime smoke test passed: both turns completed, the sandbox persisted,
+and the downloaded JSON matched the run ID, sequence, sum 28, and completion flag.
+Local evidence is under
+`artifacts/managed-agents/63dab2b91b674872b733caf1348d24b1/` (ignored by Git).
+
+## Workcell planning trial
+
+This trial gives one managed agent a short assembly procedure, operation catalog,
+and equipment inventory from `fixtures/cap_assembly.json`. The agent writes a task
+graph and scheduled machine assignments. A local validator checks the downloaded
+plan independently using the fixture's trusted operation semantics.
+
+With credentials loaded as above:
+
+```bash
+python3 examples/workcell_trial.py
+```
+
+Checks cover operation completeness, mandatory dependency edges, dependency timing,
+machine capabilities, fixture existence, resource conflicts, fixed durations,
+symbolic preconditions, and final-state predicates. All operations reserve the
+same fixture, so the accepted schedule is sequential. Agent-supplied effects are
+never used by the evaluator.
+
+Run offline validator tests:
+
+```bash
+python3 -m unittest discover -s examples -p 'test_*.py' -v
+```
+
+Tests include both valid loading orders and rejection of missing operations,
+unsupported equipment, resource overlap, missing dependencies, invalid timings,
+cyclic dependencies, missing initial objects, and fabricated effects.
+
+### First live result
+
+One trial passed on the first generated plan with `antigravity-preview-09-2026`:
+
+| Operation | Machine | Required predecessors | Start | Duration |
+| --- | --- | --- | --- | --- |
+| Load base | `robot_1` | None | 0 s | 2 s |
+| Load cap | `robot_1` | None | 2 s | 2 s |
+| Seat cap | `press_1` | Load base, load cap | 4 s | 3 s |
+| Inspect | `camera_1` | Seat cap | 7 s | 1 s |
+
+The independent evaluator reported zero violations and a symbolic final state of
+`assembly=seated`, `inspection=passed`. The 8-second makespan comes from declared
+toy operation durations; it is not measured robot or API execution time.
+
+Run ID: `f5cd40498e074e148e22950399835f71`. The prompt, input task, API response,
+sandbox snapshot, generated plan, and validation trace are saved locally under
+`artifacts/workcell-trials/<run-id>/` and ignored by Git.
+
+This is one text-grounded, single-agent planning trial. Inspection success is a
+declared deterministic transition, not a camera measurement. This trial does not
+evaluate video understanding, multi-agent performance, geometry, contact dynamics,
+OpenIndustries execution, or physical task completion.

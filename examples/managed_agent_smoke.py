@@ -62,7 +62,7 @@ def interact(key, agent, prompt, output, turn, previous=None):
         result = json.loads(request(key, "/interactions/" + quote(result["id"], safe="")))
 
 
-def verify_snapshot(snapshot, filename, expected):
+def read_snapshot_json(snapshot, filename):
     # Read only the requested regular file; never extract arbitrary archive paths.
     with tarfile.open(fileobj=io.BytesIO(snapshot), mode="r:*") as archive:
         matches = [
@@ -73,6 +73,11 @@ def verify_snapshot(snapshot, filename, expected):
             raise RuntimeError("Expected exactly one small result file in the sandbox snapshot.")
         with archive.extractfile(matches[0]) as handle:
             actual = json.load(handle)
+    return actual
+
+
+def verify_snapshot(snapshot, filename, expected):
+    actual = read_snapshot_json(snapshot, filename)
     if actual != expected:
         raise RuntimeError(f"Artifact validation failed: expected {expected!r}, received {actual!r}")
     return actual
