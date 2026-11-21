@@ -211,11 +211,25 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             folder=ARTIFACTS / "video-workcells" / match[1]
             if not folder.is_dir():return self.respond(404,{"error":"Unknown run"})
-            if match[2]:return self.file(folder / "workcell.oi.json","application/json")
+            segmented=(folder / "segments.json").exists()
+            if match[2]:return self.file(folder / ("segmented-workcell.oi.json" if segmented else "workcell.oi.json"),"application/json")
             response={name:load_json(folder / filename) for name,filename in {
-                "status":"status.json","analysis":"analysis.json","scene_spec":"scene-spec.json",
-                "validation":"validation.json","comparison":"comparison.json","frames":"frames.json"}.items()}
+                "status":"status.json","analysis":"analysis.json","scene_spec":"segmented-scene-spec.json" if segmented else "scene-spec.json",
+                "validation":"validation.json","comparison":"comparison.json","frames":"frames.json",
+                "segments":"segments.json","segments_status":"segments-status.json","segment_comparison":"segment-comparison.json",
+                "comparison_status":"comparison-status.json","segment_evidence":"segment-evidence.json"}.items()}
             return self.respond(200,response)
+        match=re.fullmatch(r"/api/video-runs/([0-9a-f]{32})/segments/([a-zA-Z0-9_-]+)/scene",path)
+        if match:
+            folder=ARTIFACTS / "video-workcells" / match[1]
+            segments=load_json(folder / "segments.json")
+            segment=next((s for s in (segments or {}).get("segments",[]) if s["step_id"]==match[2]),None)
+            if not segment:return self.respond(404,{"error":"Unknown scene segment"})
+            manifest=load_json(folder / "segmented-workcell.oi.json")
+            return self.respond(200,{**manifest,"instances":segment["instances"],"animation":segment["animation"]})
+        match=re.fullmatch(r"/media/segment-evidence/([0-9a-f]{32})/([a-zA-Z0-9_-]+\.(?:jpg|png))",path)
+        if match:
+            return self.file(ARTIFACTS / "video-workcells" / match[1] / "segment-evidence" / match[2],"image/png" if match[2].endswith(".png") else "image/jpeg")
         if path == "/media/industreal.mp4":
             return self.file(DATA / "03_assy_0_1.browser.mp4", "video/mp4")
         match=re.fullmatch(r"/media/frames/([0-9a-f]{32})/(frame-\d{2}\.jpg)",path)
@@ -241,6 +255,8 @@ class Handler(BaseHTTPRequestHandler):
                   "/runs": ("index.html", "text/html; charset=utf-8"),
                   "/video.js": ("video.js", "text/javascript; charset=utf-8"),
                   "/video.css": ("video.css", "text/css; charset=utf-8"),
+                  "/scene-capture": ("capture.html", "text/html; charset=utf-8"),
+                  "/capture.js": ("capture.js", "text/javascript; charset=utf-8"),
                   "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                   "/style.css": ("style.css", "text/css; charset=utf-8")}
         if path in assets:

@@ -69,3 +69,8 @@ layout. Evidence is saved under `artifacts/ui-evidence/`.
 
 The real live run and its limitations are documented in
 [the IndustReal example report](../docs/industreal-example.md).
+# Linked subtask playback
+
+On the video dashboard at http://127.0.0.1:5187, each reconstructed subtask has a matching native OI animation segment. Numbered chips select an interval; Play, scrub, previous/next and Loop control the video and scene together. The comparison below shows actual video and OI before/after images with a separate Gemini review of correspondences, differences and uncertainty. Download the selected animated segment independently.
+
+Full generation uses four managed-agent interactions: video analysis, workcell design, segment authoring and visual endpoint review. Keep the dashboard server running during generation: the review captures its actual WebGL renderer. Set `APP_URL` if using a port other than 5187; `CHROMIUM_BIN` can select the capture browser. Scene motion is a schematic workpiece replay; equipment and original print-set inventory remain stationary.

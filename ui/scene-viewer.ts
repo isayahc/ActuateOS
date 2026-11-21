@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
-import {createWorld} from '../.deps/OpenIndustries/src/lib/world';
+import {createWorld,applyWorldPoses} from '../.deps/OpenIndustries/src/lib/world';
 import {readManifest,hydrateManifest,evaluateWorkspace} from '../.deps/OpenIndustries/src/lib/workspace';
 
 export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:string)=>void) {
@@ -31,9 +31,32 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
     if(hit){let group=hit.object;while(group.parent && !world.groups.includes(group as any))group=group.parent;const index=world.groups.indexOf(group as any);if(index>=0)onSelect(workspace.items[index].id);}
   });
   let frame=0;
-  const tick=()=>{controls.update();renderer.render(world.scene,camera);frame=requestAnimationFrame(tick);};tick();
+  let segment:any=null, segmentItems=workspace.items, localTime=0;
+  let clock:(()=>number)|null=null;
+  const updatePose=()=>{
+    if(segment){
+      if(clock)localTime=Math.max(0,Math.min(segment.duration_s,clock()));
+      applyWorldPoses(world.groups,evaluateWorkspace(segmentItems,segment.animation,localTime));
+    }
+  };
+  const tick=()=>{updatePose();controls.update();renderer.render(world.scene,camera);frame=requestAnimationFrame(tick);};tick();
   return {
     home,
+    setSegment(next:any){
+      segment=next;localTime=0;
+      if(!next){segmentItems=workspace.items;applyWorldPoses(world.groups,evaluateWorkspace(workspace.items,workspace.animation,null));return;}
+      const poses=new Map(next.instances.map((item:any)=>[item.id,item]));
+      segmentItems=workspace.items.map(item=>({...item,...(poses.get(item.id) as any)}));
+      updatePose();
+    },
+    setTime(seconds:number){localTime=Math.max(0,Math.min(segment?.duration_s??0,seconds));updatePose();},
+    setClock(source:(()=>number)|null){clock=source;},
+    focusSegment(){
+      const fixture=workspace.items.find(item=>item.id.includes('fixture'));
+      const target=fixture?new THREE.Vector3(...fixture.position).add(new THREE.Vector3(0,.12,0)):new THREE.Vector3(0,.9,0);
+      controls.target.copy(target);camera.position.copy(target).add(new THREE.Vector3(.65,.55,.8));controls.update();
+    },
+    snapshot(){return {step_id:segment?.step_id??null,time_s:localTime,objects:world.groups.map((group,index)=>({id:workspace.items[index].id,position:group.position.toArray(),rotation:[group.rotation.x,group.rotation.y,group.rotation.z],visible:group.visible}))};},
     highlight(ids:string[]){world.groups.forEach((group,index)=>group.traverse((child:any)=>{if(child.material?.emissive){child.material.emissive.set(ids.includes(workspace.items[index].id)?'#506e20':'#000000');child.material.emissiveIntensity=.65;}}));},
     stats:()=>world.resourceStats(),
     dispose(){cancelAnimationFrame(frame);resize.disconnect();controls.dispose();world.dispose();renderer.dispose();container.replaceChildren();},

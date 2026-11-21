@@ -106,3 +106,14 @@ manifest, agent prompts/responses, snapshots, analysis, reference comparison,
 scene specification, native `.oi.json` scene, and validation report.
 `artifacts/ui-evidence/` contains browser screenshots and checks. Raw media,
 credentials, geometry, and runtime artifacts are ignored by Git.
+# Per-subtask animated scenes and visual comparisons
+
+The saved real run `7ab1900b51ad4600ba9305d9d345a111` now includes seven native OpenIndustries animation segments, one for each reconstructed video subtask. Select a numbered segment to play or scrub its video interval and scene together. Playback stops at the interval boundary unless Loop is enabled. Each segment has before/action/after descriptions and an animated OI manifest download.
+
+A third Gemini managed-agent interaction authored schematic moving workpiece proxies. The four original IndustReal print sets remain stationary reference inventory. The compiler validates segment coverage, native timelines, object mappings and cross-segment pose continuity. These checks do not establish physical execution.
+
+A fourth, separate Gemini interaction reviewed 28 images: video-before/after and actual native OI-before/after for all seven segments. Results: three `consistent_at_coarse_level`, two `partial`, one `uncertain`, and one `not_represented`. In particular, step 2's fastening change is not visible in the rendered endpoint views. The UI presents these mismatches rather than treating timestamp alignment as success. Endpoint review cannot establish intermediate motion, contact, torque or robot feasibility.
+
+Artifacts include `segments-spec.json`, `segments.json`, `segmented-workcell.oi.json`, `segment-comparison.json`, and hashed images in `segment-evidence/`. New full pipeline runs automatically perform all four interactions. Regenerate only the comparison with `python3 scripts/compare_segments.py RUN_ID` while the app is running and the API key is loaded.
+
+Verification: `node scripts/test_segments.mjs` checks valid native compilation and rejection of missing segments, discontinuities, invalid mappings and nonchanging tracks. `node scripts/test_video_ui.mjs` checks every segment's changing poses/export, synchronized scrubbing, stop/loop, review images and mobile layout against the live app and Chromium debugging port 9225.
