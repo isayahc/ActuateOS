@@ -4,6 +4,8 @@
 
 **Working research proposal · November 2026**
 
+**Gemini 4 NYC Hackathon primary track: [Element 119 — Multimodal AI](docs/hackathon-element-119.md).** The project centers on extracting a structured physical process from raw human demonstration video and turning it into a proposed, verifiable workcell. **5 Sigma evaluation methods** support the evidence, but 5 Sigma is **not** the selected submission track. **Best Use of Managed Agents** is an optional bonus target, not an achieved integration.
+
 From human demonstration videos to structured processes, configurable workcells, and verifiable execution plans.
 
 Video-to-Workcell investigates whether specialized AI agents, explicit physical-process representations, and deterministic verification can reduce the engineering effort required to automate unfamiliar physical procedures.
