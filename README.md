@@ -10,7 +10,7 @@ From human demonstration videos to structured processes, configurable workcells,
 
 Video-to-Workcell investigates whether specialized AI agents, explicit physical-process representations, and deterministic verification can reduce the engineering effort required to automate unfamiliar physical procedures.
 
-**Status:** Research specification with a [Gemini Managed Agents runtime smoke test and symbolic planning trial](examples/README.md). Both have passed live API testing with independently verified artifacts. The full research pipeline, simulator integration, and hardware controller are not implemented. All architecture, integrations, and experiments below are proposed unless stated otherwise. No benchmark results are claimed.
+**Status:** A working [IndustReal video-to-workcell example](docs/industreal-example.md): two live Gemini managed-agent interactions reconstruct sampled video evidence and author a scene rendered by native OpenIndustries code. The first run produced seven coarse steps and a ten-object conceptual workcell using original dataset geometry. Video understanding accuracy, physical feasibility, and hardware execution are not validated. The broader architecture below remains a research proposal; no benchmark scores are claimed.
 
 ## Research motivation
 
@@ -137,6 +137,11 @@ A formal, versioned schema is a planned implementation milestone. Video-derived 
 
 [OpenIndustries](https://github.com/Mapped-Assembly/OpenIndustries) is the proposed spatial and operational representation layer. The supplied research paper identifies scene serialization, equipment import, machine-state infrastructure, and agent interfaces as foundations for this integration.
 
+The [current IndustReal example](docs/industreal-example.md) now uses its native
+scene serialization, geometry hydration, and `createWorld` renderer. Gemini authors
+the scene specification; a deterministic adapter creates the portable manifest.
+This implements a visual planning integration, not an execution adapter.
+
 Validated contact dynamics, executable process semantics, benchmark-specific verification, and the Video-to-Workcell execution adapter are **proposed extensions**, not capabilities assumed to be available today. Integration details must be confirmed against the selected OpenIndustries version during implementation.
 
 ## Benchmark grounding
@@ -153,7 +158,7 @@ Validated contact dynamics, executable process semantics, benchmark-specific ver
 | **BEHAVIOR-1K** [8] | Complex everyday tasks and diverse physical interactions. |
 | **DexBench** [9] | Characterizing geometry, force, contact, observability, deformation, and dynamics complexity. |
 
-These are intended research foundations, not bundled datasets or completed integrations. Dataset access, licenses, compatible tasks, and adapter requirements must be established for each experiment. References are reproduced from the supplied working paper and are not independently verified by this repository.
+One IndustReal v2 recording is integrated in the current example; other entries remain intended research foundations. Data is downloaded separately rather than bundled. Dataset access, licenses, compatible tasks, and adapter requirements must be established for each experiment. References originate from the supplied working paper; the current IndustReal source and OpenIndustries implementation have been inspected for this example.
 
 ## Synthetic scenario generation
 
@@ -219,18 +224,35 @@ See [the evaluation protocol](docs/evaluation.md) for the proposed experiment re
 
 ```text
 video-to-workcell/
-├── README.md             # Research overview, architecture, and roadmap
-├── docs/
-│   └── evaluation.md     # Proposed evaluation protocol and reporting template
-└── .gitignore
+├── ui/                   # Video-first UI and local server; technical dashboard at /runs
+├── scripts/              # Dataset retrieval, video pipeline, build and checks
+├── integrations/         # Gemini scene specification → native OpenIndustries manifest
+├── examples/             # Earlier runtime and symbolic-planning smoke tests
+├── docs/                 # Research protocol and real-example provenance
+├── data/                 # Downloaded benchmark data (ignored)
+└── artifacts/            # Agent outputs, scenes, reports and evidence (ignored)
 ```
 
 ## Getting started
 
+### Video → analysis → workcell
+
+Requires Python 3.10+, Node.js 22+, Git, and FFmpeg/ffprobe.
+
 ```bash
 git clone https://github.com/isayahc/video-to-workcell.git
 cd video-to-workcell
+npm install
+npm run setup
+cp example.env .env
+# Set GEMINI_API_KEY in .env, then:
+python3 ui/server.py
 ```
+
+Open **http://127.0.0.1:5187** to watch the real IndustReal recording, start Gemini
+analysis, and explore the agent-designed OpenIndustries scene. Click an analysis
+step to seek the video and highlight linked equipment. Existing results load without
+another API call. See [UI setup](ui/README.md) and [example provenance](docs/industreal-example.md).
 
 Start with the architecture and evaluation plan above. To try the managed runtime, follow the [Gemini Managed Agents smoke-test instructions](examples/README.md). The sample requires Python 3.10+ and a Gemini API key, with no third-party dependencies. Implementation work should make assumptions, supported operations, and verification boundaries explicit.
 

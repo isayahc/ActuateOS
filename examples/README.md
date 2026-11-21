@@ -55,8 +55,9 @@ python3 examples/managed_agent_smoke.py --agent YOUR_AGENT_ID
 ```
 
 This is a runtime smoke test, not the Video-to-Workcell pipeline. In particular,
-Google's current managed-agent documentation lists text and image inputs; native
-video ingestion requires a separately verified integration strategy.
+Google's current managed-agent documentation lists text and image inputs. The
+[real IndustReal example](../docs/industreal-example.md) now uses timestamped sampled
+frames to reconstruct the procedure and generate an OpenIndustries scene.
 
 ## Sources
 
@@ -101,7 +102,10 @@ cyclic dependencies, missing initial objects, and fabricated effects.
 
 ### First live result
 
-One trial passed on the first generated plan with `antigravity-preview-09-2026`:
+One trial passed in a single managed-agent interaction with `antigravity-preview-09-2026`.
+The tool trace shows three code calls: an initial plan omitted dependency edges,
+a correction hit a Python syntax error, and the third call produced the valid
+artifact below. There was no additional evaluator-driven retry.
 
 | Operation | Machine | Required predecessors | Start | Duration |
 | --- | --- | --- | --- | --- |

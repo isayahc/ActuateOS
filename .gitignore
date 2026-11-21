@@ -22,3 +22,8 @@ __pycache__/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Local renderer dependencies and generated bundles
+node_modules/
+.deps/
+ui/dist/
