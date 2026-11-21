@@ -9,6 +9,14 @@ workcell; a server-owned MuJoCo runtime executes supported tasks and records the
 results. Task IDs, object bindings, targets and dependencies come from each run's
 plan rather than fixed demo names.
 
+**Two Gemini 4 models:** Hydrogen (`gemini-4-hydrogen`) reconstructs video
+evidence, compares rendered endpoints, and makes live robot decisions. Carbon
+(`gemini-4-carbon`) designs the workcell, authors reference segments, and binds
+the runtime task graph. Both run through Antigravity Managed Agents with explicit
+`agent_config.model` selection. Each call saves `model-<turn>.json` routing and
+completion metadata alongside the raw provider response. See [model routing and
+verification](docs/model-routing.md).
+
 **Current boundary:** the runtime has a schematic robot arm with bounded box
 pick-and-place support. Other operations are reported as unsupported. A generated
 scene or animation does not establish successful assembly or real-world execution.

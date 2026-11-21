@@ -8,7 +8,7 @@ import re
 import subprocess
 
 from video_pipeline import ROOT, DATA, write, download_json
-from managed_agent_smoke import DEFAULT_AGENT, interact, read_snapshot_json
+from managed_agent_smoke import DEFAULT_AGENT, PLANNING_MODEL, interact, read_snapshot_json
 
 
 def generate_segments(output, key):
@@ -29,7 +29,7 @@ Rules: each analysis step appears exactly once, same order. Every segment must c
 Observed analysis (reference annotations not supplied):\n"""+json.dumps(analysis)+"\nExisting scene (keep its objects unchanged):\n"+json.dumps(scene)
     write(output/"segments-status.json",{"phase":"generating","message":"Gemini is authoring one changing workpiece scene per video subtask."})
     (output/"segments-prompt.txt").write_text(prompt)
-    result=interact(key,DEFAULT_AGENT,prompt,output,"segments")
+    result=interact(key,DEFAULT_AGENT,prompt,output,"segments",model=PLANNING_MODEL)
     spec=download_json(key,result,"segments-spec.json",output,"segments")
     compile_segments(output,spec)
 
