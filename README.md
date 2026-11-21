@@ -30,24 +30,70 @@ Video-to-Workcell treats the **complete physical process and the workcell requir
 
 ## Proposed architecture
 
+The proposed framework transforms demonstration videos and physical context into serialized workcell configurations, executable process plans, synthetic evaluation scenarios, and independently verified outcomes. These are **intended outputs**, not claims of an implemented pipeline.
+
 ```mermaid
 flowchart TD
-    V[Human demonstration video] --> A[Agent 1: Process reconstruction]
-    G[Trusted geometry, equipment metadata, and measured properties] --> A
-    A --> P[Typed process representation]
-    P --> B[Agent 2: Workcell planning]
-    G --> B
-    B --> W[Workcell configuration and execution plan]
-    W --> C[Deterministic feasibility checks]
-    C -->|Pass| E[Execution adapter]
-    C -->|Violations| B
-    E --> O[Observed execution state]
-    O --> F[Final-state and runtime verification]
-    F -->|Failure evidence| A
-    F -->|Replanning or reconfiguration| B
-    P --> S[Controlled synthetic scenario generation]
-    S --> B
+    subgraph INPUTS["Inputs"]
+        V["Human demonstration videos<br/>RGB, multi-view, egocentric"]
+        P["Product / process specification<br/>Objectives and required final state"]
+        C["CAD and equipment models<br/>Parts, machines, tools, sensors"]
+        E["Environment and operational constraints<br/>Layout, resources, capability limits"]
+    end
+
+    subgraph PIPELINE["Video-to-Workcell framework (proposed)"]
+        A1["Gemini Agent 1<br/>Video understanding and process reconstruction"]
+        IR["Structured Process IR<br/>Operations, states, dependencies,<br/>preconditions and postconditions"]
+        SG["Synthetic scenario generator<br/>Controlled spatial and task variations"]
+        A2["Gemini Agent 2<br/>Workcell design, planning and recovery"]
+        OI["OpenIndustries<br/>Serialized workcell scene and machine layout"]
+        CHECK["Deterministic feasibility verification<br/>Graph, capabilities, resource and spatial checks"]
+        EXEC["Simulation / physical execution adapter<br/>Only supported, explicitly validated actions"]
+        QA["Independent outcome verification<br/>Final state, error records and evidence"]
+    end
+
+    subgraph OUTPUTS["Outputs"]
+        O1["Serialized workcell<br/>Equipment, layout and configuration"]
+        O2["Validated execution plan<br/>Supported operations and dependencies"]
+        O3["Synthetic benchmark scenarios<br/>Variations, seeds and expected outcomes"]
+        O4["Evaluation report<br/>Success, recovery, time, cost and failures"]
+    end
+
+    V --> A1
+    P --> A1
+    A1 --> IR
+    IR --> SG
+    IR --> A2
+    C --> A2
+    E --> A2
+    SG --> A2
+    SG --> O3
+    A2 --> OI
+    OI --> O1
+    OI --> CHECK
+    CHECK -->|Accepted| EXEC
+    CHECK -->|Rejected: revise| A2
+    CHECK -->|Validated plan| O2
+    EXEC --> QA
+    QA --> O4
+    QA -->|Execution failure| A2
+    QA -->|Missing process evidence| A1
 ```
+
+### Inputs and expected outputs
+
+| Input | Expected output |
+| --- | --- |
+| Human demonstration videos | Grounded operations, object states, and process dependencies |
+| Product or process specification | Explicit objectives, preconditions, and required final states |
+| CAD and equipment models | Serialized workcell with equipment assignments and spatial configuration |
+| Environment and resource constraints | Feasibility-checked plan for supported machine operations |
+| Grounded synthetic task variations | Reproducible benchmark scenarios, generation seeds, and expected outcomes |
+| Simulation or physical execution observations | Outcome evidence, failure diagnoses, recovery traces, and evaluation metrics |
+
+**Core transformation:** Human demonstration video + physical context → proposed executable workcell + verification evidence.
+
+Generating a plausible plan or animation does not prove physical task completion. Validation must distinguish logical checks, simulated execution, and independently evidenced physical execution.
 
 ### Agent 1 — Process reconstruction
 
