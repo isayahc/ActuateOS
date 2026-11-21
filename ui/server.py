@@ -24,6 +24,13 @@ KINDS = {"workcell-trials": "Workcell planning", "managed-agents": "Runtime smok
 active = None
 lock = threading.Lock()
 
+os.environ.setdefault("MUJOCO_GL","egl")
+os.environ.setdefault("EGL_PLATFORM","surfaceless")
+try:
+    from mujoco_runtime import runtime
+except ImportError:
+    runtime = None
+
 
 def credentials():
     env = os.environ.copy()
@@ -193,6 +200,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        match=re.fullmatch(r"/media/robot/([0-9a-f]{32})/(before\.png|after-[12]\.png|final\.json|initial-state\.json|model\.xml|trajectory\.jsonl)",path)
+        if match:
+            return self.file(ARTIFACTS/"robot-executions"/match[1]/match[2],"image/png" if match[2].endswith("png") else "application/xml" if match[2].endswith("xml") else "application/json")
+        if path == "/api/runtime":
+            return self.respond(200,{"available":runtime is not None,"engine":"MuJoCo",
+                "message":"Ready" if runtime else "Start the server with .venv-mujoco/bin/python ui/server.py"})
         if path == "/api/benchmark":
             return self.respond(200, {"provenance": load_json(DATA / "provenance.json"),
                 "catalog": load_json(DATA / "geometry-catalog.json"),
@@ -211,11 +224,25 @@ class Handler(BaseHTTPRequestHandler):
         if match:
             folder=ARTIFACTS / "video-workcells" / match[1]
             if not folder.is_dir():return self.respond(404,{"error":"Unknown run"})
-            if match[2]:return self.file(folder / "workcell.oi.json","application/json")
+            segmented=(folder / "segments.json").exists()
+            if match[2]:return self.file(folder / ("segmented-workcell.oi.json" if segmented else "workcell.oi.json"),"application/json")
             response={name:load_json(folder / filename) for name,filename in {
-                "status":"status.json","analysis":"analysis.json","scene_spec":"scene-spec.json",
-                "validation":"validation.json","comparison":"comparison.json","frames":"frames.json"}.items()}
+                "status":"status.json","analysis":"analysis.json","scene_spec":"segmented-scene-spec.json" if segmented else "scene-spec.json",
+                "validation":"validation.json","comparison":"comparison.json","frames":"frames.json",
+                "segments":"segments.json","segments_status":"segments-status.json","segment_comparison":"segment-comparison.json",
+                "comparison_status":"comparison-status.json","segment_evidence":"segment-evidence.json"}.items()}
             return self.respond(200,response)
+        match=re.fullmatch(r"/api/video-runs/([0-9a-f]{32})/segments/([a-zA-Z0-9_-]+)/scene",path)
+        if match:
+            folder=ARTIFACTS / "video-workcells" / match[1]
+            segments=load_json(folder / "segments.json")
+            segment=next((s for s in (segments or {}).get("segments",[]) if s["step_id"]==match[2]),None)
+            if not segment:return self.respond(404,{"error":"Unknown scene segment"})
+            manifest=load_json(folder / "segmented-workcell.oi.json")
+            return self.respond(200,{**manifest,"instances":segment["instances"],"animation":segment["animation"]})
+        match=re.fullmatch(r"/media/segment-evidence/([0-9a-f]{32})/([a-zA-Z0-9_-]+\.(?:jpg|png))",path)
+        if match:
+            return self.file(ARTIFACTS / "video-workcells" / match[1] / "segment-evidence" / match[2],"image/png" if match[2].endswith(".png") else "image/jpeg")
         if path == "/media/industreal.mp4":
             return self.file(DATA / "03_assy_0_1.browser.mp4", "video/mp4")
         match=re.fullmatch(r"/media/frames/([0-9a-f]{32})/(frame-\d{2}\.jpg)",path)
@@ -241,6 +268,8 @@ class Handler(BaseHTTPRequestHandler):
                   "/runs": ("index.html", "text/html; charset=utf-8"),
                   "/video.js": ("video.js", "text/javascript; charset=utf-8"),
                   "/video.css": ("video.css", "text/css; charset=utf-8"),
+                  "/scene-capture": ("capture.html", "text/html; charset=utf-8"),
+                  "/capture.js": ("capture.js", "text/javascript; charset=utf-8"),
                   "/app.js": ("app.js", "text/javascript; charset=utf-8"),
                   "/style.css": ("style.css", "text/css; charset=utf-8")}
         if path in assets:
@@ -253,6 +282,44 @@ class Handler(BaseHTTPRequestHandler):
         expected_origin = f"http://{self.headers.get('Host')}"
         if self.headers.get("Origin") != expected_origin or self.headers.get("Content-Type") != "application/json":
             return self.respond(403, {"error": "Use the local dashboard to start a run."})
+        if self.path.startswith("/api/runtime/"):
+            if runtime is None:return self.respond(503,{"error":"MuJoCo unavailable. Use .venv-mujoco/bin/python ui/server.py"})
+            try:
+                length=int(self.headers.get("Content-Length","0"))
+                if not 0<length<=4096:raise ValueError("Invalid runtime request size")
+                data=json.loads(self.rfile.read(length))
+                if not isinstance(data,dict):raise ValueError("Expected JSON object")
+                if self.path=="/api/runtime/connect":
+                    run_id=data.get("run_id","");step_id=data.get("step_id","")
+                    if not isinstance(run_id,str) or not re.fullmatch(r"[0-9a-f]{32}",run_id):raise ValueError("Invalid run")
+                    if not isinstance(step_id,str):raise ValueError("Invalid step")
+                    return self.respond(200,runtime.create(ARTIFACTS/"video-workcells"/run_id,step_id,data.get("mode","mujoco")))
+                sid=data.get("session_id")
+                if not isinstance(sid,str):raise ValueError("Invalid session")
+                if self.path=="/api/runtime/close":
+                    runtime.close(sid);return self.respond(200,{"closed":True})
+                if self.path=="/api/runtime/advance":
+                    simulation=runtime.get(sid)
+                    if not hasattr(simulation,"advance"):raise ValueError("Robot uses its own execution clock, not video seeking")
+                    return self.respond(200,simulation.advance(data.get("time_s")))
+                if self.path in ("/api/runtime/robot-tick","/api/runtime/robot-agent","/api/runtime/robot-pause","/api/runtime/robot-perturb"):
+                    simulation=runtime.get(sid)
+                    if not hasattr(simulation,"observe"):raise ValueError("Connect the live robot runtime first")
+                    if self.path.endswith("robot-tick"):return self.respond(200,simulation.tick())
+                    if self.path.endswith("robot-perturb"):return self.respond(200,simulation.perturb(data.get("dx"),data.get("dz")))
+                    if self.path.endswith("robot-pause"):
+                        if type(data.get("paused")) is not bool:raise ValueError("Expected paused boolean")
+                        with simulation.lock:
+                            if simulation.phase not in ("idle","completed","failed"):simulation.running=not data["paused"]
+                            return self.respond(200,simulation.snapshot())
+                    from robot_agent import start_agent
+                    env=credentials();key=env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
+                    if not key:raise ValueError("Set GEMINI_API_KEY to request live agent decisions")
+                    start_agent(simulation,sid,key)
+                    return self.respond(202,simulation.snapshot())
+                return self.respond(404,{"error":"Unknown runtime action"})
+            except (ValueError,RuntimeError,OSError,KeyError) as error:
+                return self.respond(409,{"error":str(error)})
         if self.path not in {"/api/run", "/api/video-run"}:
             return self.respond(404, {"error": "Not found"})
         try:

@@ -106,3 +106,25 @@ manifest, agent prompts/responses, snapshots, analysis, reference comparison,
 scene specification, native `.oi.json` scene, and validation report.
 `artifacts/ui-evidence/` contains browser screenshots and checks. Raw media,
 credentials, geometry, and runtime artifacts are ignored by Git.
+# Per-subtask animated scenes and visual comparisons
+
+The saved real run `7ab1900b51ad4600ba9305d9d345a111` now includes seven native OpenIndustries animation segments, one for each reconstructed video subtask. Select a numbered segment to play or scrub its video interval and scene together. Playback stops at the interval boundary unless Loop is enabled. Each segment has before/action/after descriptions and an animated OI manifest download.
+
+A third Gemini managed-agent interaction authored schematic moving workpiece proxies. The four original IndustReal print sets remain stationary reference inventory. The compiler validates segment coverage, native timelines, object mappings and cross-segment pose continuity. These checks do not establish physical execution.
+
+A fourth, separate Gemini interaction reviewed 28 images: video-before/after and actual native OI-before/after for all seven segments. Results: three `consistent_at_coarse_level`, two `partial`, one `uncertain`, and one `not_represented`. In particular, step 2's fastening change is not visible in the rendered endpoint views. The UI presents these mismatches rather than treating timestamp alignment as success. Endpoint review cannot establish intermediate motion, contact, torque or robot feasibility.
+
+Artifacts include `segments-spec.json`, `segments.json`, `segmented-workcell.oi.json`, `segment-comparison.json`, and hashed images in `segment-evidence/`. New full pipeline runs automatically perform all four interactions. Regenerate only the comparison with `python3 scripts/compare_segments.py RUN_ID` while the app is running and the API key is loaded.
+
+Verification: `node scripts/test_segments.mjs` checks valid native compilation and rejection of missing segments, discontinuities, invalid mappings and nonchanging tracks. `node scripts/test_video_ui.mjs` checks every segment's changing poses/export, synchronized scrubbing, stop/loop, review images and mobile layout against the live app and Chromium debugging port 9225.
+# Live articulated robot milestone
+
+The live robot now stages the existing `proxy_beam_left` beside the fixture as a prerequisite to step 1. It is not a full frame-assembly implementation. Six arm hinges and two gripper slides execute through MuJoCo actuators; the beam moves through friction contacts, without mocap, object animation tracks or grasp welds.
+
+Gemini receives a current MuJoCo camera image plus explicitly labeled simulator ground-truth poses and selects a bounded reusable skill. IK and collision-checked trajectories are recomputed from the measured joint/object state. After execution, Gemini receives a new observation and the measured result. The robot has its own clock, independently of video timing.
+
+Live managed-agent execution `9621ef5633744d7eac5933f8bcda2a3a` moved the source by −6 cm in X and −4 cm in Z before observation. The agent selected `pick_place`, the physical gripper retained the beam through lift/transfer, and the measured final staging error was **1.62 mm**. A separate agent turn selected `finish` based on that result. This number describes one simulated staging trial, not benchmark accuracy or physical-world validation. The initial prior execution `5b1567d474aa40328e71a1ecd69ecc72` completed the physical action but failed to read duplicate identical agent artifact copies; that artifact-reader issue was fixed and the failed record retained.
+
+Automated dynamics checks cover three starting poses with distinct planned trajectory hashes, loss of gripper actuation (must fail without moving the part), blocked approach, unreachable destination, pause behavior, unsupported steps, and conflicting agent artifacts. The full seven-subtask robot assembly, vision-only localization, insertion/fastening skills and hardware calibration remain unimplemented.
+
+Browser-driven execution `f413b2bc45c04b72b2ef54df422f8cc3` also completed through the real UI and two live agent decisions after a +8 cm X / −4 cm Z perturbation, with 1.32 mm final staging error. The browser verified moving joint/link states, pause/resume and actual before/after images. Its final mobile assertion caught unwrapped result JSON; CSS wrapping was fixed and checked at 390 px using the saved result text without another paid execution. Actual live screenshots are retained locally as `artifacts/ui-evidence/robot-live-grasp.png` and `robot-live-final.png`.
