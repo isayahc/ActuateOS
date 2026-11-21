@@ -16,7 +16,9 @@
     <section id="segment-controls" hidden>
       <div class="segment-top"><div><span class="eyebrow">LINKED VIDEO + OI PLAYBACK</span><h2 id="segment-title">Select a subtask</h2></div><div id="segment-chips"></div></div>
       <div class="transport"><button id="previous-segment" aria-label="Previous segment">←</button><button id="play-segment">▶ Play segment</button><button id="next-segment" aria-label="Next segment">→</button><input id="segment-scrub" type="range" min="0" max="1000" value="0" aria-label="Synchronized video and scene position"><span id="segment-time"></span><label><input type="checkbox" id="loop-segment"> Loop</label></div>
-      <p class="small">Video and scene share a clock and stop at the selected boundary. Scene motion is schematic workpiece movement, not robot IK or contact simulation.</p>
+      <p class="small">Video and scene share a clock and stop at the selected boundary. MuJoCo solves guided workpiece dynamics and contacts; the proposed robot has no articulated controller.</p>
+      <div class="runtime-controls"><label>OI motion source <select id="motion-source"><option value="mujoco">Live MuJoCo dynamics</option><option value="storyboard">Authored storyboard</option></select></label><button id="reconnect-runtime">Reconnect runtime</button><strong id="runtime-status" role="status">MuJoCo · connecting…</strong></div>
+      <p id="runtime-metrics" class="small">Waiting for physics state.</p>
     </section>
     <div class="columns">
       <section class="card source">

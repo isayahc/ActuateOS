@@ -14,6 +14,51 @@ let launching = false;
 let selectedStep = null;
 let reviewSignature = '';
 let inUnsegmentedGap = false;
+let runtimeSession=null, runtimeGeneration=0, runtimeBusy=false, lastRuntimeTime=-1;
+const physicsEnabled=()=>$('motion-source').value==='mujoco';
+const runtimeRequest=(action,body)=>api(`/api/runtime/${action}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+function closeRuntime(){
+  runtimeGeneration++;lastRuntimeTime=-1;
+  const old=runtimeSession;runtimeSession=null;
+  if(old)runtimeRequest('close',{session_id:old}).catch(()=>{});
+}
+async function connectRuntime(){
+  closeRuntime();const generation=runtimeGeneration,segment=activeSegment();
+  viewer?.setPhysicsMode(physicsEnabled());
+  $('runtime-status').dataset.state='connecting';
+  if(!physicsEnabled()){
+    $('runtime-status').textContent='Authored storyboard · no physics';$('runtime-metrics').textContent='Reference animation used by the saved endpoint review.';
+    $('renderer-status').textContent='OpenIndustries renderer · authored storyboard';return;
+  }
+  if(!segment)return;
+  $('runtime-status').textContent='MuJoCo · connecting…';
+  try{
+    const state=await runtimeRequest('connect',{run_id:selected,step_id:segment.step_id});
+    if(generation!==runtimeGeneration){runtimeRequest('close',{session_id:state.session_id}).catch(()=>{});return;}
+    runtimeSession=state.session_id;viewer?.setPhysicsState(state);showRuntime(state);
+  }catch(err){if(generation===runtimeGeneration){$('video').pause();$('runtime-status').dataset.state='error';$('runtime-status').textContent=`MuJoCo disconnected · ${err.message}`;}}
+}
+function showRuntime(state){
+  $('runtime-status').dataset.state='ready';
+  $('runtime-status').textContent=`MuJoCo ${state.version} · ${$('video').paused?'paused':'running'}`;
+  $('runtime-metrics').textContent=`Simulation ${state.time_s.toFixed(2)}s · ${state.steps} physics steps · ${state.contacts} contacts · maximum guide error ${(state.max_tracking_error_m*1000).toFixed(1)} mm. Convex proposed-part colliders; original print sets are visual-only.`;
+  $('renderer-status').textContent=`OpenIndustries renderer ← MuJoCo ${state.version} · ${state.steps} physics steps`;
+}
+async function runtimeTick(){
+  const segment=activeSegment(),session=runtimeSession,generation=runtimeGeneration;
+  if(physicsEnabled() && segment && session && !runtimeBusy){
+    const target=Math.max(0,Math.min(segment.duration_s,$('video').currentTime-segment.start_s));
+    if(Math.abs(target-lastRuntimeTime)>.004){
+      runtimeBusy=true;
+      try{
+        const state=await runtimeRequest('advance',{session_id:session,time_s:target});
+        if(generation===runtimeGeneration){lastRuntimeTime=target;viewer?.setPhysicsState(state);showRuntime(state);}
+      }catch(err){if(generation===runtimeGeneration){$('video').pause();closeRuntime();$('runtime-status').dataset.state='error';$('runtime-status').textContent=`MuJoCo stopped · ${err.message}`;}}
+      finally{runtimeBusy=false;}
+    }else if($('runtime-status').dataset.state==='ready')$('runtime-status').textContent=$('runtime-status').textContent.replace(/running|paused/,$('video').paused?'paused':'running');
+  }
+  setTimeout(runtimeTick,80);
+}
 const activeSegment = () => current?.segments?.segments.find(segment=>segment.step_id===selectedStep);
 
 async function api(url, options) {
@@ -44,11 +89,12 @@ function chooseStep(id, jump=true) {
     viewer?.setSegment(segment);
     viewer?.setClock(()=>Math.max(0,Math.min(segment.duration_s,$('video').currentTime-segment.start_s)));
     viewer?.focusSegment();
+    connectRuntime();
     $('segment-controls').hidden=false;
     $('segment-title').textContent=`${step.title} · ${clock(step.start_s)}–${clock(step.end_s)}`;
     document.querySelectorAll('[data-segment]').forEach(el=>el.classList.toggle('selected',el.dataset.segment===id));
-    $('scene-states').innerHTML=['before','action','after'].map(key=>`<div class="scene-state"><b>${key.toUpperCase()}</b> ${esc(segment[key])}</div>`).join('');
-    $('render-caption').textContent=`${id} · synchronized schematic workpiece replay`;
+    $('scene-states').innerHTML='<p class="small">Authored plan — physics may deviate. Selecting a segment initializes its authored starting state.</p>'+['before','action','after'].map(key=>`<div class="scene-state"><b>${key.toUpperCase()}</b> ${esc(segment[key])}</div>`).join('');
+    $('render-caption').textContent=`${id} · ${physicsEnabled()?'MuJoCo-driven workpieces':'authored storyboard'}`;
     $('download-segment').hidden=false;$('download-segment').href=`/api/video-runs/${selected}/segments/${encodeURIComponent(id)}/scene`;
     renderSegmentReview();
   }
@@ -69,7 +115,7 @@ function renderSegmentReview(){
   const step=current.analysis.steps.find(item=>item.id===segment.step_id);
   const refs=evidence?.reference_labels || current.comparison?.rows.filter(row=>row.time_s>=segment.start_s&&row.time_s<=segment.end_s) || [];
   $('segment-review').innerHTML=`<div class="review-heading"><div><p class="eyebrow">COMPARISON FOR THIS SUBTASK</p><h2>${esc(segment.title)}</h2></div><span class="verdict">${review?esc(review.verdict.replaceAll('_',' ')):'Visual review pending'}</span></div>
-    <p class="review-note">${review?'Gemini reviewed actual video and actual OI endpoint renders. This is model judgment, not a benchmark score or physical verification.':esc(current.comparison_status?.message || 'Scene-author intent is shown below; it has not yet been visually compared.')}</p>
+    <p class="review-note">${review?'Gemini reviewed video against the AUTHORED STORYBOARD endpoint renders below. This saved review does not assess the live MuJoCo trajectory. It is model judgment, not a benchmark score or physical verification.':esc(current.comparison_status?.message || 'Scene-author intent is shown below; it has not yet been visually compared.')}</p>
     <div class="review-grid"><div class="review-side"><h3>HUMAN VIDEO · ${clock(segment.start_s)}–${clock(segment.end_s)}</h3>${images('video')}<p>${esc(review?.observed_change || step.evidence)}</p></div><div class="review-side"><h3>OPENINDUSTRIES · SAME SUBTASK</h3>${images('scene')}<p>${esc(review?.rendered_change || segment.before+' → '+segment.after)}</p></div></div>
     <div class="review-findings"><div><h3>${review?'Visible correspondences':'Authored object correspondence'}</h3>${list(review?.matched_aspects || segment.object_mapping.map(m=>`${m.observed} → ${m.scene_object_ids.join(', ')} (${m.representation})`))}</div><div><h3>Differences / missing actions</h3>${list(review?.differences || segment.differences)}</div><div><h3>Not established</h3>${list(review?.not_verifiable || [step.uncertainty,'No visual reviewer result yet.','Robot reach, contact forces, fastening torque and successful execution remain unverified.'])}</div></div>
     <p class="reference-match"><strong>Dataset completion labels within this interval:</strong> ${refs.length?refs.map(ref=>`${clock(ref.time_s)} ${esc(ref.label)}`).join(' · '):'None. This is not an automatic mismatch: labels annotate completion, not every visible action.'}</p>
@@ -84,6 +130,7 @@ function chooseObject(id) {
   $('render-caption').textContent=`${object.name} · ${object.kind==='dataset'?'original dataset geometry':'Gemini-proposed equipment'}`;
 }
 function clearRun() {
+  closeRuntime();
   current=null; renderedAnalysis=null;renderedComparison=null;renderedFrames=null;loadedScene=null;selectedStep=null;
   reviewSignature='';inUnsegmentedGap=false;$('video').pause();
   viewer?.dispose(); viewer=null;
@@ -179,6 +226,7 @@ for(const [button,delta]of [['previous-segment',-1],['next-segment',1]])$(button
 });
 $('play-segment').addEventListener('click',async()=>{
   const segment=activeSegment();if(!segment)return;
+  if(physicsEnabled() && !runtimeSession){await connectRuntime();if(!runtimeSession)return;}
   if(!$('video').paused){$('video').pause();return;}
   if($('video').currentTime<segment.start_s || $('video').currentTime>=segment.end_s-.05)seek(segment.start_s);
   try{await $('video').play();}catch(err){error(err.message);}
@@ -210,5 +258,11 @@ function playbackTick(){
   requestAnimationFrame(playbackTick);
 }
 playbackTick();
+$('motion-source').addEventListener('change',()=>{$('video').pause();connectRuntime();});
+$('reconnect-runtime').addEventListener('click',()=>{$('video').pause();connectRuntime();});
+window.addEventListener('pagehide',()=>{
+  if(runtimeSession)fetch('/api/runtime/close',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:runtimeSession}),keepalive:true}).catch(()=>{});
+});
+runtimeTick();
 async function poll(){await refresh();setTimeout(poll,2500);}
 poll();

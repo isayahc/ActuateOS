@@ -31,6 +31,8 @@ try{
   await call('Page.navigate',{url:app});
   await wait('window.workcellEvidence?.stats.instances > 0');
   await wait("document.querySelector('#video').readyState >= 2");
+  await wait("window.workcellEvidence.playback().engine==='MuJoCo' && window.workcellEvidence.playback().physics!==null");
+  await evaluate("document.querySelector('#motion-source').value='storyboard';document.querySelector('#motion-source').dispatchEvent(new Event('change'))");
   const info=await evaluate(`({render:window.workcellEvidence,steps:document.querySelectorAll('.step').length,objects:document.querySelectorAll('.object').length,sourceObjects:document.querySelectorAll('.object[data-kind=dataset]').length,duration:document.querySelector('#video').duration})`);
   if(info.sourceObjects!==4 || info.steps<1 || Math.abs(info.duration-275.4)>.2)throw new Error(JSON.stringify(info));
   await evaluate("document.querySelectorAll('.step')[2].click()");
@@ -75,6 +77,18 @@ try{
   }
   await evaluate("document.querySelector('#reference').open=false;document.querySelector('#reset-view').click();document.querySelector('#video').currentTime=152.24");
   await wait("!document.querySelector('#video').seeking");
+  await evaluate("document.querySelectorAll('[data-segment]')[0].click();document.querySelector('#motion-source').value='mujoco';document.querySelector('#motion-source').dispatchEvent(new Event('change'))");
+  await wait("window.workcellEvidence.playback().engine==='MuJoCo' && window.workcellEvidence.playback().physics!==null");
+  await evaluate("document.querySelector('#play-segment').click()");
+  await wait("window.workcellEvidence.playback().physics.steps>=200 && document.querySelector('#runtime-status').textContent.includes('running')");
+  await evaluate("document.querySelector('#video').pause()");
+  await wait("Math.abs(window.workcellEvidence.playback().time_s-document.querySelector('#video').currentTime)<.02");
+  const physics=await evaluate('window.workcellEvidence.playback()');
+  if(physics.engine!=='MuJoCo' || physics.physics.steps<200)throw new Error('No real MuJoCo state reached OI');
+  await evaluate("document.querySelector('#segment-scrub').value=0;document.querySelector('#segment-scrub').dispatchEvent(new Event('input'))");
+  await wait("window.workcellEvidence.playback().physics.steps===0");
+  await evaluate("document.querySelectorAll('[data-segment]')[4].click();document.querySelector('#segment-scrub').value=500;document.querySelector('#segment-scrub').dispatchEvent(new Event('input'))");
+  await wait("window.workcellEvidence.playback().step_id==='step_5' && window.workcellEvidence.playback().physics?.steps>1000");
   mkdirSync('artifacts/ui-evidence',{recursive:true});
   let image=await call('Page.captureScreenshot',{format:'png'});
   writeFileSync('artifacts/ui-evidence/video-workcell-desktop.png',Buffer.from(image.data,'base64'));
@@ -84,6 +98,6 @@ try{
   image=await call('Page.captureScreenshot',{format:'png'});
   writeFileSync('artifacts/ui-evidence/video-workcell-mobile.png',Buffer.from(image.data,'base64'));
   if(errors.length)throw new Error(JSON.stringify(errors));
-  writeFileSync('artifacts/ui-evidence/browser-checks.json',JSON.stringify({passed:true,...info,manifest,errors},null,2));
-  console.log('PASS: real video, native OI, dataset geometry, all segment state changes/exports, synchronized scrubbing, stop/loop, comparison images, reference labels and mobile layout.');
+  writeFileSync('artifacts/ui-evidence/browser-checks.json',JSON.stringify({passed:true,...info,manifest,physics,errors},null,2));
+  console.log('PASS: live MuJoCo poses/step counters/play/pause/rewind/segment switching, storyboard segments, exports, stop/loop, comparison images and mobile layout.');
 }finally{ws.close();await fetch(`${debug}/json/close/${page.id}`);}

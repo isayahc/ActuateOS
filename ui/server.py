@@ -24,6 +24,11 @@ KINDS = {"workcell-trials": "Workcell planning", "managed-agents": "Runtime smok
 active = None
 lock = threading.Lock()
 
+try:
+    from mujoco_runtime import runtime
+except ImportError:
+    runtime = None
+
 
 def credentials():
     env = os.environ.copy()
@@ -193,6 +198,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         path = urlparse(self.path).path
+        if path == "/api/runtime":
+            return self.respond(200,{"available":runtime is not None,"engine":"MuJoCo",
+                "message":"Ready" if runtime else "Start the server with .venv-mujoco/bin/python ui/server.py"})
         if path == "/api/benchmark":
             return self.respond(200, {"provenance": load_json(DATA / "provenance.json"),
                 "catalog": load_json(DATA / "geometry-catalog.json"),
@@ -269,6 +277,27 @@ class Handler(BaseHTTPRequestHandler):
         expected_origin = f"http://{self.headers.get('Host')}"
         if self.headers.get("Origin") != expected_origin or self.headers.get("Content-Type") != "application/json":
             return self.respond(403, {"error": "Use the local dashboard to start a run."})
+        if self.path.startswith("/api/runtime/"):
+            if runtime is None:return self.respond(503,{"error":"MuJoCo unavailable. Use .venv-mujoco/bin/python ui/server.py"})
+            try:
+                length=int(self.headers.get("Content-Length","0"))
+                if not 0<length<=4096:raise ValueError("Invalid runtime request size")
+                data=json.loads(self.rfile.read(length))
+                if not isinstance(data,dict):raise ValueError("Expected JSON object")
+                if self.path=="/api/runtime/connect":
+                    run_id=data.get("run_id","");step_id=data.get("step_id","")
+                    if not isinstance(run_id,str) or not re.fullmatch(r"[0-9a-f]{32}",run_id):raise ValueError("Invalid run")
+                    if not isinstance(step_id,str):raise ValueError("Invalid step")
+                    return self.respond(200,runtime.create(ARTIFACTS/"video-workcells"/run_id,step_id))
+                sid=data.get("session_id")
+                if not isinstance(sid,str):raise ValueError("Invalid session")
+                if self.path=="/api/runtime/close":
+                    runtime.close(sid);return self.respond(200,{"closed":True})
+                if self.path=="/api/runtime/advance":
+                    return self.respond(200,runtime.get(sid).advance(data.get("time_s")))
+                return self.respond(404,{"error":"Unknown runtime action"})
+            except (ValueError,RuntimeError,OSError,KeyError) as error:
+                return self.respond(409,{"error":str(error)})
         if self.path not in {"/api/run", "/api/video-run"}:
             return self.respond(404, {"error": "Not found"})
         try:

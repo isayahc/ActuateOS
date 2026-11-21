@@ -33,7 +33,9 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
   let frame=0;
   let segment:any=null, segmentItems=workspace.items, localTime=0;
   let clock:(()=>number)|null=null;
+  let physicsMode=false, physicsState:any=null;
   const updatePose=()=>{
+    if(physicsMode)return;
     if(segment){
       if(clock)localTime=Math.max(0,Math.min(segment.duration_s,clock()));
       applyWorldPoses(world.groups,evaluateWorkspace(segmentItems,segment.animation,localTime));
@@ -42,6 +44,16 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
   const tick=()=>{updatePose();controls.update();renderer.render(world.scene,camera);frame=requestAnimationFrame(tick);};tick();
   return {
     home,
+    setPhysicsMode(enabled:boolean){physicsMode=enabled;physicsState=null;},
+    setPhysicsState(state:any){
+      if(!physicsMode || state.step_id!==segment?.step_id)return;
+      physicsState=state;localTime=state.time_s;
+      const poses=new Map(state.objects.map((item:any)=>[item.id,item]));
+      world.groups.forEach((group,index)=>{
+        const pose:any=poses.get(workspace.items[index].id);if(!pose)return;
+        group.position.fromArray(pose.position);group.quaternion.fromArray(pose.quaternion);group.visible=pose.visible;
+      });
+    },
     setSegment(next:any){
       segment=next;localTime=0;
       if(!next){segmentItems=workspace.items;applyWorldPoses(world.groups,evaluateWorkspace(workspace.items,workspace.animation,null));return;}
@@ -56,7 +68,7 @@ export function mountScene(container:HTMLElement, manifest:any, onSelect:(id:str
       const target=fixture?new THREE.Vector3(...fixture.position).add(new THREE.Vector3(0,.12,0)):new THREE.Vector3(0,.9,0);
       controls.target.copy(target);camera.position.copy(target).add(new THREE.Vector3(.65,.55,.8));controls.update();
     },
-    snapshot(){return {step_id:segment?.step_id??null,time_s:localTime,objects:world.groups.map((group,index)=>({id:workspace.items[index].id,position:group.position.toArray(),rotation:[group.rotation.x,group.rotation.y,group.rotation.z],visible:group.visible}))};},
+    snapshot(){return {step_id:segment?.step_id??null,time_s:localTime,engine:physicsMode?'MuJoCo':'OI storyboard',physics:physicsState?{steps:physicsState.steps,contacts:physicsState.contacts,max_tracking_error_m:physicsState.max_tracking_error_m}:null,objects:world.groups.map((group,index)=>({id:workspace.items[index].id,position:group.position.toArray(),rotation:[group.rotation.x,group.rotation.y,group.rotation.z],visible:group.visible}))};},
     highlight(ids:string[]){world.groups.forEach((group,index)=>group.traverse((child:any)=>{if(child.material?.emissive){child.material.emissive.set(ids.includes(workspace.items[index].id)?'#506e20':'#000000');child.material.emissiveIntensity=.65;}}));},
     stats:()=>world.resourceStats(),
     dispose(){cancelAnimationFrame(frame);resize.disconnect();controls.dispose();world.dispose();renderer.dispose();container.replaceChildren();},

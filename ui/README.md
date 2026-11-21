@@ -8,7 +8,9 @@ Requires Python 3.10+, Node.js 22+, Git, FFmpeg and ffprobe.
 npm install
 npm run setup
 # Set GEMINI_API_KEY in .env (see example.env)
-python3 ui/server.py
+python3 -m venv .venv-mujoco
+.venv-mujoco/bin/python -m pip install -r requirements-mujoco.txt
+.venv-mujoco/bin/python ui/server.py
 ```
 
 Open **http://127.0.0.1:5187**. Use `--port 5188` to choose another port. Setup
@@ -40,7 +42,7 @@ proximity is a debugging aid, **not** semantic accuracy or a benchmark score.
 
 ## Runs
 
-**Analyze video & build workcell** starts two real, potentially billable managed-agent
+**Analyze video & build workcell** starts four real, potentially billable managed-agent
 interactions. The server loads credentials from its environment or `.env`; no key
 is sent to the browser. Progress refreshes every 2.5 seconds. Existing results can
 be viewed without credentials. No prebuilt scene replaces a failed model result.
@@ -70,6 +72,23 @@ layout. Evidence is saved under `artifacts/ui-evidence/`.
 The real live run and its limitations are documented in
 [the IndustReal example report](../docs/industreal-example.md).
 # Linked subtask playback
+
+## Live MuJoCo runtime (default motion source)
+
+```bash
+python3 -m venv .venv-mujoco
+.venv-mujoco/bin/python -m pip install -r requirements-mujoco.txt
+npm run build
+.venv-mujoco/bin/python ui/server.py
+```
+
+Open http://127.0.0.1:5187 and press **Play segment**. The runtime indicator shows connection/running/paused state, simulation seconds, actual `mj_step` count, current contacts and maximum guide tracking error. The OI renderer displays MuJoCo `xpos`/`xquat` body states; browser keyframes are disabled in this mode. A runtime failure pauses playback and displays the error. **Reconnect runtime** retries; **Authored storyboard** explicitly selects the earlier animation.
+
+`ui/mujoco_runtime.py` adapts this generated workcell to MuJoCo 3.3.7. Proposed normalized OI mesh parts become convex colliders; moving proxies are free bodies, controlled by compliant welds to scripted mocap targets. Gravity and contacts are solved at 200 Hz. The robot/equipment remain static: this is guided workpiece dynamics, not articulated robot IK or a grasp/fastener controller. Original print-set meshes remain visual-only inventory. This adapter uses the IndustReal workcell, not OI's unrelated farm demo.
+
+Each selected segment initializes its authored starting state. Rewinding deterministically resets/reintegrates that segment; pausing stops integration. Simulation deviations are **not** carried into the next segment. Saved endpoint comparisons and OI animation exports remain the authored storyboard and are labeled accordingly; they do not validate the live physics trajectory.
+
+Verify physics with `.venv-mujoco/bin/python scripts/test_mujoco_runtime.py`. It exercises every real segment, contacts, deterministic rewind, pause, independent sessions, input bounds, and freefall with guide constraints disabled. `node scripts/test_video_ui.mjs` additionally verifies live physics reaches the native OI viewer, play/pause/rewind, segment switching and mobile layout.
 
 On the video dashboard at http://127.0.0.1:5187, each reconstructed subtask has a matching native OI animation segment. Numbered chips select an interval; Play, scrub, previous/next and Loop control the video and scene together. The comparison below shows actual video and OI before/after images with a separate Gemini review of correspondences, differences and uncertainty. Download the selected animated segment independently.
 
