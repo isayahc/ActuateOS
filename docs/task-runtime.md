@@ -157,3 +157,13 @@ retains online model decisions. Both paths share the same task graph and physics
 Unit tests cover failed grasps, unreachable/blocked targets, replanning, DAG
 validation and unsupported-task propagation. Three legacy guided-physics tests
 require saved IndustReal artifacts and are skipped when those artifacts are absent.
+
+### Geometry origins and grasp targets
+
+Targets remain world-space **body origin** positions. The gripper aims at the
+center of the compiled box vertices, including the part-local offset; it does
+not assume that the body origin sits beneath the box center. Pickup uses the
+measured body transform, while placement converts the requested unrotated body
+origin to the corresponding box center. Transfer and retreat retain that offset.
+Changing an asset origin without changing its world geometry must not break a
+previously feasible contact grasp. This does not add rotated-workpiece support.

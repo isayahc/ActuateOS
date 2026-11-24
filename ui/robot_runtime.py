@@ -134,11 +134,21 @@ class RobotSimulation:
         self.object_geom_ids={self.model.geom(n).id for n in self.workpiece_geoms[self.object_id]}
         vertices=np.array(self.assets[next(i["assetId"] for i in self.instances if i["id"]==self.object_id)]["parts"][0]["vertices"]).reshape(-1,3)
         self.object_size=vertices.max(axis=0)-vertices.min(axis=0)
+        self.grasp_offset=(vertices.max(axis=0)+vertices.min(axis=0))/2
         self.source=self.data.xpos[self.object_body].copy();self.start_position=self.source.copy()
         self.goal=np.array(task["target"]["position"],float)
         self.phase="idle";self.running=False;self.result=None;self.plan=None;self.attempts=0
         self.agent_status="not requested";self.captured_images=[]
         self.task_started=float(self.data.time)
+
+    def grasp_position(self) -> np.ndarray:
+        """Transform the compiled box center from body-local to measured world space."""
+        rotation = self.data.xmat[self.object_body].reshape(3, 3)
+        return self.data.xpos[self.object_body] + rotation @ self.grasp_offset
+
+    def placement_grasp_position(self) -> np.ndarray:
+        """Convert the unrotated target body origin into a gripper-center target."""
+        return self.goal + self.grasp_offset
 
     def observe(self):
         return {"source":"MuJoCo ground-truth poses, not visual pose estimation","step_id":self.step_id,
@@ -219,7 +229,7 @@ class RobotSimulation:
                 if self.phase not in ("idle","failed") or self.attempts>=2:raise ValueError("Pick/place unavailable in current state")
                 if decision.get("object_id")!=self.object_id or decision.get("target_id")!=self.task["target"]["id"]:raise ValueError("Unknown object/target")
                 self.attempts+=1;self.result=None;self.start_position=self.data.xpos[self.object_body].copy()
-                self.pick=self.start_position+np.array([0,self.object_size[1]/2,0]);self.lift_baseline=float(self.start_position[1])
+                self.pick=self.grasp_position();self.lift_baseline=float(self.start_position[1])
                 self.phase="approach";self.running=True;self.data.ctrl[6:]=.04
                 try:self.plan_to(self.pick+[0,.18,0])
                 except ValueError as error:self.fail(str(error))
@@ -242,7 +252,7 @@ class RobotSimulation:
     def next_phase(self):
         if self.phase=="approach":
             # Reobserve immediately before descent, allowing a changed source pose.
-            self.pick=self.data.xpos[self.object_body].copy()+[0,self.object_size[1]/2,0]
+            self.pick=self.grasp_position()
             self.phase="descend";self.plan_to(self.pick,True)
         elif self.phase=="descend":
             self.phase="close";self.plan=None;self.data.ctrl[6:]=0;self.phase_started=self.data.time
@@ -250,8 +260,8 @@ class RobotSimulation:
             rise=float(self.data.xpos[self.object_body][1]-self.lift_baseline)
             if rise<.07 or len(self.grasp_contacts())<2:return self.fail("Grasp did not retain the part during lift")
             self.events.append({"event":"grasp_verified","rise_m":rise,"finger_contacts":2})
-            self.phase="transfer";self.plan_to(self.goal+[0,.20,0],True)
-        elif self.phase=="transfer":self.phase="lower";self.plan_to(self.goal+[0,self.object_size[1]/2+.003,0],True)
+            self.phase="transfer";self.plan_to(self.placement_grasp_position()+[0,.20,0],True)
+        elif self.phase=="transfer":self.phase="lower";self.plan_to(self.placement_grasp_position()+[0,.003,0],True)
         elif self.phase=="lower":
             self.phase="release";self.plan=None;self.data.ctrl[6:]=.04;self.phase_started=self.data.time
         elif self.phase=="retreat":
@@ -273,7 +283,7 @@ class RobotSimulation:
                         if len(self.grasp_contacts())<2:self.fail("No bilateral finger contact; grasp refused")
                         else:self.phase="lift";self.plan_to(self.pick+[0,.18,0],True)
                     elif self.phase=="release" and self.data.time-self.phase_started>.6:
-                        self.phase="retreat";self.plan_to(self.goal+[0,.20,0],True)
+                        self.phase="retreat";self.plan_to(self.placement_grasp_position()+[0,.20,0],True)
                     elif self.phase=="settle" and self.data.time-self.phase_started>1:
                         position=self.data.xpos[self.object_body];error=float(np.linalg.norm(position-self.goal))
                         joint=self.model.joint(self.workpiece_joints[self.object_id]);speed=float(np.linalg.norm(self.data.qvel[joint.dofadr[0]:joint.dofadr[0]+6]))
