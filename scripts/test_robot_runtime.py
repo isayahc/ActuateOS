@@ -58,6 +58,33 @@ class RobotTests(unittest.TestCase):
                 hashes.append(next(e["sha256"] for e in sim.events if e["event"] == "online_plan"))
         self.assertEqual(len(set(hashes)), 3)
 
+    def test_offset_geometry_uses_mesh_center_for_grasp(self) -> None:
+        """Equivalent geometry with a different body origin must still transfer."""
+        from task_graph import validate_plan
+        for offset in ([.06, 0, 0], [0, -.012, 0], [0, 0, .06]):
+            with self.subTest(offset=offset):
+                values = fixture(self.folder)
+                manifest = values["segmented-workcell.oi.json"]
+                spec = values["segmented-scene-spec.json"]
+                shift = np.array(offset)
+                vertices = np.array(manifest["bundledAssets"][-1]["parts"][0]["vertices"]).reshape(-1, 3)
+                manifest["bundledAssets"][-1]["parts"][0]["vertices"] = (vertices + shift).reshape(-1).tolist()
+                for item in (manifest["instances"][-1], spec["objects"][-1]):
+                    item["position"] = (np.array(item["position"]) - shift).tolist()
+                spec["objects"][-1]["parts"][0]["position"] = (np.array([0, .012, 0]) + shift).tolist()
+                plan = values["runtime-plan.json"]
+                for task in plan["tasks"]:
+                    task["target"]["position"] = (np.array(task["target"]["position"]) - shift).tolist()
+                validate_plan(plan, values["analysis.json"], manifest, spec)
+                for name, value in values.items():
+                    (self.folder / name).write_text(json.dumps(value))
+                sim = RobotSimulation(self.folder, plan["tasks"][0], plan)
+                for task in plan["tasks"]:
+                    sim.bind_task(task)
+                    result = execute(sim)
+                    self.assertTrue(result["result"]["passed"], result["result"])
+                    self.assertTrue(any(e["event"] == "grasp_verified" for e in sim.events))
+
     def test_obstacle_and_unreachable_target_fail(self) -> None:
         """The controller rejects impossible targets instead of replaying a path."""
         sim = self.simulation()
